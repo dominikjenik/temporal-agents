@@ -26,9 +26,12 @@ src/temporal_agents/
 ├── signals/
 │   └── __init__.py
 ├── workers/
-│   └── __init__.py
+│   ├── __init__.py          — public exports: ACTIVITIES, WORKFLOWS
+│   └── worker.py            — WORKFLOWS = [FeatureWorkflow, ProjectWorkflow], ACTIVITIES list
 └── workflows/
-    └── __init__.py
+    ├── __init__.py          — public exports: FeatureInput, FeatureWorkflow, make_feature_workflow_id, ProjectInput, ProjectWorkflow
+    ├── feature_workflow.py  — FeatureInput dataclass, FeatureWorkflow (ginidocs: dev+tester, zbornik: dev_zbornik)
+    └── project_workflow.py  — ProjectInput dataclass, ProjectWorkflow (ginidocs: parallel, zbornik: sequential), make_feature_workflow_id
 ```
 
 ## Test tree — tests/
@@ -39,7 +42,8 @@ tests/
 │   └── __init__.py
 └── unit/
     ├── __init__.py
-    └── test_activities.py   — unit tests for activities layer (8 tests)
+    ├── test_activities.py   — unit tests for activities layer (8 tests)
+    └── test_workflows.py    — unit tests for FeatureWorkflow and ProjectWorkflow (7 tests)
 ```
 
 ## Key design decisions
