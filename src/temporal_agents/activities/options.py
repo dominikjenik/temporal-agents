@@ -79,3 +79,22 @@ EXECUTE_DB_QUERY_OPTIONS = ActivityOptions(
     start_to_close_timeout=timedelta(seconds=10),
     retry_policy=RetryPolicy(maximum_attempts=2),
 )
+
+MANAGER_OPTIONS = ActivityOptions(
+    schedule_to_close_timeout=timedelta(minutes=5),
+    retry_policy=RetryPolicy(
+        maximum_attempts=1,
+        initial_interval=timedelta(seconds=5),
+        backoff_coefficient=2.0,
+    ),
+)
+
+RUN_STUB_OPTIONS = ActivityOptions(
+    start_to_close_timeout=timedelta(seconds=10),
+    retry_policy=RetryPolicy(maximum_attempts=1),
+)
+
+RUN_CHAT_OPTIONS = ActivityOptions(
+    start_to_close_timeout=timedelta(minutes=5),
+    retry_policy=RetryPolicy(maximum_attempts=2),
+)
