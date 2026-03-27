@@ -19,7 +19,7 @@ class ActivityOptions:
 DEVELOPER_OPTIONS = ActivityOptions(
     schedule_to_close_timeout=timedelta(minutes=30),
     retry_policy=RetryPolicy(
-        maximum_attempts=3,
+        maximum_attempts=1,
         initial_interval=timedelta(seconds=5),
         backoff_coefficient=2.0,
     ),
@@ -28,7 +28,7 @@ DEVELOPER_OPTIONS = ActivityOptions(
 TESTER_OPTIONS = ActivityOptions(
     schedule_to_close_timeout=timedelta(minutes=10),
     retry_policy=RetryPolicy(
-        maximum_attempts=3,
+        maximum_attempts=1,
         initial_interval=timedelta(seconds=5),
         backoff_coefficient=2.0,
     ),
@@ -37,7 +37,7 @@ TESTER_OPTIONS = ActivityOptions(
 DEVELOPER_ZBORNIK_OPTIONS = ActivityOptions(
     schedule_to_close_timeout=timedelta(minutes=30),
     retry_policy=RetryPolicy(
-        maximum_attempts=3,
+        maximum_attempts=1,
         initial_interval=timedelta(seconds=5),
         backoff_coefficient=2.0,
     ),
@@ -46,7 +46,16 @@ DEVELOPER_ZBORNIK_OPTIONS = ActivityOptions(
 DEVOPS_ZBORNIK_OPTIONS = ActivityOptions(
     schedule_to_close_timeout=timedelta(minutes=20),
     retry_policy=RetryPolicy(
-        maximum_attempts=2,
+        maximum_attempts=1,
+        initial_interval=timedelta(seconds=5),
+        backoff_coefficient=2.0,
+    ),
+)
+
+CAPTURE_LESSON_OPTIONS = ActivityOptions(
+    schedule_to_close_timeout=timedelta(minutes=1),
+    retry_policy=RetryPolicy(
+        maximum_attempts=1,
         initial_interval=timedelta(seconds=5),
         backoff_coefficient=2.0,
     ),

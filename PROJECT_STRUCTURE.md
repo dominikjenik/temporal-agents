@@ -14,6 +14,11 @@
 - `docker-compose.yml`   — Temporal server dev environment
 - `main.py`              — entry point (worker bootstrap)
 
+## Top-level directories
+- `lessons/`               — self-improvement staging area (REQ-015)
+  - `pending.md`           — lessons appended by capture_lesson activity, awaiting manual review
+  - `README.md`            — explains the self-improvement loop and promotion flow
+
 ## Source tree — src/temporal_agents/
 ```
 src/temporal_agents/
@@ -22,7 +27,8 @@ src/temporal_agents/
 │   ├── __init__.py        — public exports for the activities package
 │   ├── base.py            — ClaudeActivityInput, ClaudeActivityOutput, run_claude_activity
 │   ├── agents.py          — developer_activity, tester_activity, developer_zbornik_activity, devops_zbornik_activity
-│   └── options.py         — ActivityOptions dataclass + DEVELOPER/TESTER/DEVELOPER_ZBORNIK/DEVOPS_ZBORNIK_OPTIONS
+│   ├── lesson.py          — capture_lesson activity (PHASE5-001, REQ-015)
+│   └── options.py         — ActivityOptions dataclass + DEVELOPER/TESTER/DEVELOPER_ZBORNIK/DEVOPS_ZBORNIK/CAPTURE_LESSON_OPTIONS
 ├── signals/
 │   └── __init__.py
 ├── workers/
@@ -42,8 +48,9 @@ tests/
 │   └── __init__.py
 └── unit/
     ├── __init__.py
-    ├── test_activities.py   — unit tests for activities layer (8 tests)
-    └── test_workflows.py    — unit tests for FeatureWorkflow and ProjectWorkflow (7 tests)
+    ├── test_activities.py      — unit tests for activities layer (8 tests)
+    ├── test_lesson_activity.py — unit tests for capture_lesson activity (PHASE5-001)
+    └── test_workflows.py       — unit tests for FeatureWorkflow and ProjectWorkflow (7 tests)
 ```
 
 ## Key design decisions

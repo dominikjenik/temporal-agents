@@ -45,9 +45,9 @@
 - [x] Integracne testy s realnym Temporal serverom  [2/2 zelene + 1 skip (ManagerWorkflow); Podman localhost:7233]
 
 ## Faza 5 -- Self-improvement slucka
-- [ ] lessons/pending.md staging area
-- [ ] Skill capture-lesson
-- [ ] REQ-015 + rozsirenia agent definicii
+- [x] lessons/pending.md staging area  [lessons/pending.md + lessons/README.md (REQ-015 dokumentacia)]
+- [x] Activity capture_lesson  [src/temporal_agents/activities/lesson.py, CAPTURE_LESSON_OPTIONS, 6/6 unit testov zelene]
+- [x] REQ-015 + rozsirenia agent definicii  [lessons/README.md: flow pending.md -> manuálny review -> ~/.claude/agents/*.md]
 
 ## Faza 6 -- Pokrocile funkcie (napady)
 <!-- Pridane 2026-03-27 -->
