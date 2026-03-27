@@ -51,10 +51,12 @@
 
 ## Faza 6 -- Pokrocile funkcie (napady)
 <!-- Pridane 2026-03-27 -->
-- [ ] HITL zaznamy v PostgreSQL s prioritizaciou
+- [x] HITL zaznamy v PostgreSQL s prioritizaciou
   - Kazdy HITL request sa uklada do DB (tabulka hitl_requests: id, workflow_id, description, priority, status, created_at)
   - Manager moze zobrazit prioritizovany zoznam cakajucich HITLov (napr. CLI: `temporal-agents hitl list`)
-- [ ] Manager DB-query vrstva
+  - [hitl_db.py: store_hitl_request, list_hitl_requests; alembic migration; CLI hitl list]
+- [x] Manager DB-query vrstva
   - Manager generuje strukturovany JSON dotaz (napr. {table: "hitl_requests", filter: {status: "pending"}, order: "priority"})
   - Temporal activity vykona SELECT nad tabulkou a vrati vysledok spat manazerovi
   - Nahradi pure-LLM lookup — deterministicke, auditovatelne
+  - [hitl_db.py: execute_db_query s WHITELIST_TABLES; DBQuery pydantic model]

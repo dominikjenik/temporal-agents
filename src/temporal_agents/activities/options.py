@@ -1,5 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
+from typing import Optional
 
 from temporalio.common import RetryPolicy
 
@@ -10,10 +11,13 @@ class ActivityOptions:
 
     Attributes mirror the keys accepted by temporalio.workflow.ActivityConfig so
     callers can unpack with **dataclasses.asdict(options) when needed.
+
+    Either schedule_to_close_timeout or start_to_close_timeout must be set.
     """
 
-    schedule_to_close_timeout: timedelta
     retry_policy: RetryPolicy
+    schedule_to_close_timeout: Optional[timedelta] = None
+    start_to_close_timeout: Optional[timedelta] = None
 
 
 DEVELOPER_OPTIONS = ActivityOptions(
@@ -59,4 +63,19 @@ CAPTURE_LESSON_OPTIONS = ActivityOptions(
         initial_interval=timedelta(seconds=5),
         backoff_coefficient=2.0,
     ),
+)
+
+STORE_HITL_OPTIONS = ActivityOptions(
+    start_to_close_timeout=timedelta(seconds=30),
+    retry_policy=RetryPolicy(maximum_attempts=3),
+)
+
+LIST_HITL_OPTIONS = ActivityOptions(
+    start_to_close_timeout=timedelta(seconds=10),
+    retry_policy=RetryPolicy(maximum_attempts=2),
+)
+
+EXECUTE_DB_QUERY_OPTIONS = ActivityOptions(
+    start_to_close_timeout=timedelta(seconds=10),
+    retry_policy=RetryPolicy(maximum_attempts=2),
 )
