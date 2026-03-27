@@ -27,7 +27,7 @@ src/temporal_agents/
 │   └── __init__.py
 ├── workers/
 │   ├── __init__.py          — public exports: ACTIVITIES, WORKFLOWS
-│   └── worker.py            — WORKFLOWS = [FeatureWorkflow, ProjectWorkflow], ACTIVITIES list
+│   └── worker.py            — WORKFLOWS list, ACTIVITIES list, main() with Client.connect + Worker(task_queue="temporal-agents", max_concurrent_activities=5)
 └── workflows/
     ├── __init__.py          — public exports: FeatureInput, FeatureWorkflow, make_feature_workflow_id, ProjectInput, ProjectWorkflow
     ├── feature_workflow.py  — FeatureInput dataclass, FeatureWorkflow (ginidocs: dev+tester, zbornik: dev_zbornik)
