@@ -2,7 +2,7 @@ import os
 import uuid
 import asyncio
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Literal, Optional
 import aiosqlite
 from pydantic import BaseModel, Field
 from temporalio import activity
@@ -11,11 +11,10 @@ from temporalio import activity
 DB_URL: str = os.environ.get("HITL_DB_URL", "sqlite:///tmp/hitl.db")
 
 # Only these tables are allowed in execute_db_query
-WHITELIST_TABLES = {"hitl_requests"}
+WHITELIST_TABLES = {"tasks"}
 
 
 def _db_path() -> str:
-    """Extract filesystem path from sqlite:/// URL."""
     url = DB_URL
     if url.startswith("sqlite:///"):
         return url[len("sqlite:///"):]
@@ -25,26 +24,29 @@ def _db_path() -> str:
 
 
 async def _init_db(db: aiosqlite.Connection) -> None:
-    """Create hitl_requests table if it does not exist (SQLite compatible schema)."""
     await db.execute("""
-        CREATE TABLE IF NOT EXISTS hitl_requests (
+        CREATE TABLE IF NOT EXISTS tasks (
             id TEXT PRIMARY KEY,
-            workflow_id TEXT NOT NULL,
-            description TEXT NOT NULL,
+            project TEXT NOT NULL,
+            title TEXT NOT NULL,
             priority INTEGER DEFAULT 5,
             status TEXT DEFAULT 'pending',
+            type TEXT DEFAULT 'task',
+            workflow_id TEXT,
             created_at TEXT NOT NULL
         )
     """)
     await db.commit()
 
 
-class HitlRequest(BaseModel):
+class Task(BaseModel):
     id: uuid.UUID
-    workflow_id: str
-    description: str
+    project: str
+    title: str
     priority: int = 5
-    status: Literal['pending', 'confirmed', 'cancelled'] = 'pending'
+    status: Literal['pending', 'in_progress', 'done', 'confirmed', 'cancelled'] = 'pending'
+    type: Literal['task', 'hitl'] = 'task'
+    workflow_id: Optional[str] = None
     created_at: datetime
 
 
@@ -56,45 +58,56 @@ class DBQuery(BaseModel):
 
 
 @activity.defn
-async def store_hitl_request(workflow_id: str, description: str, priority: int = 5) -> HitlRequest:
-    """Insert a new HITL request record and return it."""
+async def store_task(
+    project: str,
+    title: str,
+    priority: int = 5,
+    type: str = 'task',
+    workflow_id: Optional[str] = None,
+) -> Task:
+    """Insert a new task (or HITL task) and return it."""
     record_id = uuid.uuid4()
     now = datetime.now(timezone.utc)
     async with aiosqlite.connect(_db_path()) as db:
         await _init_db(db)
         await db.execute(
-            "INSERT INTO hitl_requests (id, workflow_id, description, priority, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)",
-            (str(record_id), workflow_id, description, priority, now.isoformat())
+            "INSERT INTO tasks (id, project, title, priority, status, type, workflow_id, created_at) "
+            "VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)",
+            (str(record_id), project, title, priority, type, workflow_id, now.isoformat())
         )
         await db.commit()
-    return HitlRequest(
+    return Task(
         id=record_id,
-        workflow_id=workflow_id,
-        description=description,
+        project=project,
+        title=title,
         priority=priority,
         status='pending',
-        created_at=now
+        type=type,
+        workflow_id=workflow_id,
+        created_at=now,
     )
 
 
 @activity.defn
-async def list_hitl_requests(status: str = 'pending') -> list[HitlRequest]:
-    """Return HITL requests filtered by status, sorted by priority ASC then created_at ASC."""
+async def list_tasks(status: str = 'pending') -> list[Task]:
+    """Return tasks filtered by status, sorted by priority ASC then project ASC."""
     async with aiosqlite.connect(_db_path()) as db:
         await _init_db(db)
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
-            "SELECT * FROM hitl_requests WHERE status = ? ORDER BY priority ASC, created_at ASC",
+            "SELECT * FROM tasks WHERE status = ? ORDER BY priority ASC, project ASC",
             (status,)
         )
         rows = await cursor.fetchall()
     return [
-        HitlRequest(
+        Task(
             id=uuid.UUID(row['id']),
-            workflow_id=row['workflow_id'],
-            description=row['description'],
+            project=row['project'],
+            title=row['title'],
             priority=row['priority'],
             status=row['status'],
+            type=row['type'],
+            workflow_id=row['workflow_id'],
             created_at=datetime.fromisoformat(row['created_at'])
         )
         for row in rows
@@ -105,12 +118,11 @@ async def list_hitl_requests(status: str = 'pending') -> list[HitlRequest]:
 async def execute_db_query(query: DBQuery) -> list[dict]:
     """Execute a parameterized SELECT against a whitelisted table."""
     if query.table not in WHITELIST_TABLES:
-        raise ValueError(f"Table '{query.table}' is not allowed. Allowed tables: {WHITELIST_TABLES}")
+        raise ValueError(f"Table '{query.table}' is not allowed. Allowed: {WHITELIST_TABLES}")
 
     sql = f"SELECT * FROM {query.table}"
     params = []
 
-    # Build WHERE clause from filter dict
     if query.filter:
         conditions = [f"{k} = ?" for k in query.filter.keys()]
         sql += " WHERE " + " AND ".join(conditions)

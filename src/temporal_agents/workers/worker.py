@@ -8,11 +8,13 @@ from temporal_agents.activities.agents import (
     developer_zbornik_activity,
     devops_zbornik_activity,
     manager_activity,
+    parse_intent_activity,
     run_claude_chat_activity,
     run_project_stub_activity,
     tester_activity,
 )
 from temporal_agents.activities.base import run_claude_activity
+from temporal_agents.activities.hitl_db import execute_db_query, list_tasks, store_task
 from temporal_agents.workflows import (
     ClaudeChatWorkflow,
     FeatureWorkflow,
@@ -27,9 +29,13 @@ ACTIVITIES = [
     developer_zbornik_activity,
     devops_zbornik_activity,
     manager_activity,
+    parse_intent_activity,
     run_project_stub_activity,
     run_claude_chat_activity,
     run_claude_activity,
+    store_task,
+    list_tasks,
+    execute_db_query,
 ]
 
 

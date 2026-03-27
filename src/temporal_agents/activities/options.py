@@ -65,14 +65,9 @@ CAPTURE_LESSON_OPTIONS = ActivityOptions(
     ),
 )
 
-STORE_HITL_OPTIONS = ActivityOptions(
+STORE_TASK_OPTIONS = ActivityOptions(
     start_to_close_timeout=timedelta(seconds=30),
     retry_policy=RetryPolicy(maximum_attempts=3),
-)
-
-LIST_HITL_OPTIONS = ActivityOptions(
-    start_to_close_timeout=timedelta(seconds=10),
-    retry_policy=RetryPolicy(maximum_attempts=2),
 )
 
 EXECUTE_DB_QUERY_OPTIONS = ActivityOptions(

@@ -1,6 +1,6 @@
 from .claude_chat_workflow import ClaudeChatWorkflow
 from .feature_workflow import FeatureInput, FeatureWorkflow
-from .manager_workflow import ManagerInput, ManagerWorkflow
+from .manager_workflow import ManagerInput, ManagerWorkflow, _format_tasks
 from .project_workflow import make_feature_workflow_id, ProjectInput, ProjectWorkflow
 
 __all__ = [

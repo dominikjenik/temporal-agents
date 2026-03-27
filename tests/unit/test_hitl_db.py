@@ -1,8 +1,4 @@
-"""Unit tests for hitl_db activities (TDD — implementation does not exist yet).
-
-All tests are intentionally RED until src/temporal_agents/activities/hitl_db.py
-and the corresponding options in options.py are implemented.
-"""
+"""Unit tests for unified tasks DB activities."""
 
 from datetime import timedelta
 from unittest.mock import patch
@@ -11,246 +7,168 @@ import pytest
 
 
 # ---------------------------------------------------------------------------
-# Pydantic models
+# Pydantic model
 # ---------------------------------------------------------------------------
 
-
 class TestDBQueryModelDefaults:
-    """DBQuery must expose correct default values for optional fields."""
-
     def test_dbquery_model_defaults(self):
         from temporal_agents.activities.hitl_db import DBQuery
-
-        query = DBQuery(table="hitl_requests")
-
+        query = DBQuery(table="tasks")
         assert query.filter == {}
         assert query.order == ""
         assert query.limit == 100
 
 
 # ---------------------------------------------------------------------------
-# store_hitl_request
+# store_task
 # ---------------------------------------------------------------------------
 
-
-class TestStoreHitlRequest:
-    """store_hitl_request must insert a record and return a valid HitlRequest."""
-
-    async def test_store_hitl_request(self, tmp_path):
-        db_url = f"sqlite:///{tmp_path}/hitl.db"
-
+class TestStoreTask:
+    async def test_store_regular_task(self, tmp_path):
+        db_url = f"sqlite:///{tmp_path}/tasks.db"
         with patch("temporal_agents.activities.hitl_db.DB_URL", db_url):
-            with patch("temporalio.activity.heartbeat"):
-                from temporal_agents.activities.hitl_db import store_hitl_request
-
-                result = await store_hitl_request(
-                    workflow_id="wf-001", description="Approve deployment"
-                )
+            from temporal_agents.activities.hitl_db import store_task
+            result = await store_task(project="zbornik", title="Fix crash")
 
         import uuid
         from datetime import datetime
-
-        assert result.workflow_id == "wf-001"
-        assert result.description == "Approve deployment"
+        assert result.project == "zbornik"
+        assert result.title == "Fix crash"
+        assert result.type == "task"
+        assert result.workflow_id is None
         assert result.status == "pending"
         assert isinstance(result.id, uuid.UUID)
         assert isinstance(result.created_at, datetime)
 
-    async def test_store_hitl_request_default_priority(self, tmp_path):
-        db_url = f"sqlite:///{tmp_path}/hitl.db"
-
+    async def test_store_hitl_task(self, tmp_path):
+        db_url = f"sqlite:///{tmp_path}/tasks.db"
         with patch("temporal_agents.activities.hitl_db.DB_URL", db_url):
-            with patch("temporalio.activity.heartbeat"):
-                from temporal_agents.activities.hitl_db import store_hitl_request
+            from temporal_agents.activities.hitl_db import store_task
+            result = await store_task(
+                project="ginidocs",
+                title="Approve deployment",
+                priority=1,
+                type="hitl",
+                workflow_id="wf-123",
+            )
 
-                result = await store_hitl_request(
-                    workflow_id="wf-002", description="Check config"
-                )
+        assert result.type == "hitl"
+        assert result.workflow_id == "wf-123"
+        assert result.priority == 1
 
+    async def test_store_task_default_priority(self, tmp_path):
+        db_url = f"sqlite:///{tmp_path}/tasks.db"
+        with patch("temporal_agents.activities.hitl_db.DB_URL", db_url):
+            from temporal_agents.activities.hitl_db import store_task
+            result = await store_task(project="zbornik", title="Some task")
         assert result.priority == 5
 
 
 # ---------------------------------------------------------------------------
-# list_hitl_requests
+# list_tasks
 # ---------------------------------------------------------------------------
 
-
-class TestListHitlRequests:
-    """list_hitl_requests must filter and sort correctly."""
-
-    async def test_list_hitl_requests_returns_pending_only(self, tmp_path):
-        db_url = f"sqlite:///{tmp_path}/hitl.db"
-
+class TestListTasks:
+    async def test_list_tasks_returns_pending_only(self, tmp_path):
+        db_url = f"sqlite:///{tmp_path}/tasks.db"
         with patch("temporal_agents.activities.hitl_db.DB_URL", db_url):
-            with patch("temporalio.activity.heartbeat"):
-                from temporal_agents.activities.hitl_db import (
-                    list_hitl_requests,
-                    store_hitl_request,
-                )
+            from temporal_agents.activities.hitl_db import list_tasks, store_task
+            import aiosqlite
 
-                pending = await store_hitl_request(
-                    workflow_id="wf-p1", description="Pending task"
-                )
-                confirmed = await store_hitl_request(
-                    workflow_id="wf-c1", description="Confirmed task"
-                )
+            pending = await store_task(project="zbornik", title="Pending task")
+            done = await store_task(project="zbornik", title="Done task")
 
-                # Manually flip one record to 'confirmed' via a second store call
-                # with status override — or patch DB directly.
-                # The confirmed record is stored as pending; we need to update it.
-                # We use execute_db_query indirectly via raw manipulation:
-                import aiosqlite
+            db_path = db_url.removeprefix("sqlite:///")
+            async with aiosqlite.connect(db_path) as db:
+                await db.execute("UPDATE tasks SET status='done' WHERE id=?", (str(done.id),))
+                await db.commit()
 
-                db_path = db_url.removeprefix("sqlite:///")
-                async with aiosqlite.connect(db_path) as db:
-                    await db.execute(
-                        "UPDATE hitl_requests SET status='confirmed' WHERE id=?",
-                        (str(confirmed.id),),
-                    )
-                    await db.commit()
-
-                results = await list_hitl_requests(status="pending")
+            results = await list_tasks(status="pending")
 
         ids = [r.id for r in results]
         assert pending.id in ids
-        assert confirmed.id not in ids
+        assert done.id not in ids
 
-    async def test_list_hitl_requests_sorted_by_priority(self, tmp_path):
-        db_url = f"sqlite:///{tmp_path}/hitl.db"
-
+    async def test_list_tasks_sorted_by_priority(self, tmp_path):
+        db_url = f"sqlite:///{tmp_path}/tasks.db"
         with patch("temporal_agents.activities.hitl_db.DB_URL", db_url):
-            with patch("temporalio.activity.heartbeat"):
-                from temporal_agents.activities.hitl_db import (
-                    list_hitl_requests,
-                    store_hitl_request,
-                )
-
-                high = await store_hitl_request(
-                    workflow_id="wf-h", description="High priority", priority=1
-                )
-                low = await store_hitl_request(
-                    workflow_id="wf-l", description="Low priority", priority=9
-                )
-                mid = await store_hitl_request(
-                    workflow_id="wf-m", description="Mid priority", priority=5
-                )
-
-                results = await list_hitl_requests(status="pending")
+            from temporal_agents.activities.hitl_db import list_tasks, store_task
+            await store_task(project="zbornik", title="Low", priority=9)
+            await store_task(project="zbornik", title="High", priority=1)
+            await store_task(project="zbornik", title="Mid", priority=5)
+            results = await list_tasks(status="pending")
 
         priorities = [r.priority for r in results]
-        assert priorities == sorted(priorities), (
-            f"Expected ascending priority order, got: {priorities}"
-        )
+        assert priorities == sorted(priorities)
+
+    async def test_list_tasks_hitl_and_task_together(self, tmp_path):
+        db_url = f"sqlite:///{tmp_path}/tasks.db"
+        with patch("temporal_agents.activities.hitl_db.DB_URL", db_url):
+            from temporal_agents.activities.hitl_db import list_tasks, store_task
+            t = await store_task(project="zbornik", title="Regular", type="task")
+            h = await store_task(project="zbornik", title="HITL confirm", type="hitl", workflow_id="wf-1")
+            results = await list_tasks(status="pending")
+
+        types = {r.type for r in results}
+        assert "task" in types
+        assert "hitl" in types
 
 
 # ---------------------------------------------------------------------------
 # execute_db_query
 # ---------------------------------------------------------------------------
 
-
 class TestExecuteDbQuery:
-    """execute_db_query must enforce the table whitelist and support filters."""
-
-    async def test_execute_db_query_unknown_table_raises(self, tmp_path):
-        db_url = f"sqlite:///{tmp_path}/hitl.db"
-
+    async def test_unknown_table_raises(self, tmp_path):
+        db_url = f"sqlite:///{tmp_path}/tasks.db"
         with patch("temporal_agents.activities.hitl_db.DB_URL", db_url):
-            with patch("temporalio.activity.heartbeat"):
-                from temporal_agents.activities.hitl_db import (
-                    DBQuery,
-                    execute_db_query,
-                )
+            from temporal_agents.activities.hitl_db import DBQuery, execute_db_query
+            with pytest.raises(ValueError):
+                await execute_db_query(DBQuery(table="users"))
 
-                with pytest.raises(ValueError):
-                    await execute_db_query(DBQuery(table="users"))
-
-    async def test_execute_db_query_hitl_requests(self, tmp_path):
-        db_url = f"sqlite:///{tmp_path}/hitl.db"
-
+    async def test_query_tasks_table(self, tmp_path):
+        db_url = f"sqlite:///{tmp_path}/tasks.db"
         with patch("temporal_agents.activities.hitl_db.DB_URL", db_url):
-            with patch("temporalio.activity.heartbeat"):
-                from temporal_agents.activities.hitl_db import (
-                    DBQuery,
-                    execute_db_query,
-                    store_hitl_request,
-                )
-
-                await store_hitl_request(
-                    workflow_id="wf-q1", description="Query test"
-                )
-
-                results = await execute_db_query(DBQuery(table="hitl_requests"))
+            from temporal_agents.activities.hitl_db import DBQuery, execute_db_query, store_task
+            await store_task(project="zbornik", title="Query test")
+            results = await execute_db_query(DBQuery(table="tasks"))
 
         assert isinstance(results, list)
         assert len(results) >= 1
         assert all(isinstance(row, dict) for row in results)
 
-    async def test_execute_db_query_with_filter(self, tmp_path):
-        db_url = f"sqlite:///{tmp_path}/hitl.db"
-
+    async def test_query_with_filter(self, tmp_path):
+        db_url = f"sqlite:///{tmp_path}/tasks.db"
         with patch("temporal_agents.activities.hitl_db.DB_URL", db_url):
-            with patch("temporalio.activity.heartbeat"):
-                from temporal_agents.activities.hitl_db import (
-                    DBQuery,
-                    execute_db_query,
-                    store_hitl_request,
-                )
+            from temporal_agents.activities.hitl_db import DBQuery, execute_db_query, store_task
+            import aiosqlite
 
-                r1 = await store_hitl_request(
-                    workflow_id="wf-f1", description="Filter pending"
-                )
-                r2 = await store_hitl_request(
-                    workflow_id="wf-f2", description="Filter confirmed"
-                )
+            r1 = await store_task(project="zbornik", title="Pending")
+            r2 = await store_task(project="zbornik", title="Done")
 
-                import aiosqlite
+            db_path = db_url.removeprefix("sqlite:///")
+            async with aiosqlite.connect(db_path) as db:
+                await db.execute("UPDATE tasks SET status='done' WHERE id=?", (str(r2.id),))
+                await db.commit()
 
-                db_path = db_url.removeprefix("sqlite:///")
-                async with aiosqlite.connect(db_path) as db:
-                    await db.execute(
-                        "UPDATE hitl_requests SET status='confirmed' WHERE id=?",
-                        (str(r2.id),),
-                    )
-                    await db.commit()
-
-                results = await execute_db_query(
-                    DBQuery(table="hitl_requests", filter={"status": "pending"})
-                )
+            results = await execute_db_query(DBQuery(table="tasks", filter={"status": "pending"}))
 
         statuses = [row["status"] for row in results]
-        assert all(s == "pending" for s in statuses), (
-            f"Expected only pending rows, got statuses: {statuses}"
-        )
+        assert all(s == "pending" for s in statuses)
         assert len(statuses) >= 1
 
 
 # ---------------------------------------------------------------------------
-# options.py — HITL activity options
+# options.py
 # ---------------------------------------------------------------------------
 
-
-class TestStoreHitlOptions:
-    """STORE_HITL_OPTIONS must have start_to_close_timeout of 30 seconds."""
-
-    def test_store_hitl_options_timeout(self):
-        from temporal_agents.activities.options import STORE_HITL_OPTIONS
-
-        assert STORE_HITL_OPTIONS.start_to_close_timeout == timedelta(seconds=30)
-
-
-class TestListHitlOptions:
-    """LIST_HITL_OPTIONS must have start_to_close_timeout of 10 seconds."""
-
-    def test_list_hitl_options_timeout(self):
-        from temporal_agents.activities.options import LIST_HITL_OPTIONS
-
-        assert LIST_HITL_OPTIONS.start_to_close_timeout == timedelta(seconds=10)
+class TestStoreTaskOptions:
+    def test_store_task_options_timeout(self):
+        from temporal_agents.activities.options import STORE_TASK_OPTIONS
+        assert STORE_TASK_OPTIONS.start_to_close_timeout == timedelta(seconds=30)
 
 
 class TestExecuteDbQueryOptions:
-    """EXECUTE_DB_QUERY_OPTIONS must have start_to_close_timeout of 10 seconds."""
-
     def test_execute_db_query_options_timeout(self):
         from temporal_agents.activities.options import EXECUTE_DB_QUERY_OPTIONS
-
         assert EXECUTE_DB_QUERY_OPTIONS.start_to_close_timeout == timedelta(seconds=10)

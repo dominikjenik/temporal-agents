@@ -14,9 +14,11 @@ from .options import (
     DEVELOPER_OPTIONS,
     DEVELOPER_ZBORNIK_OPTIONS,
     DEVOPS_ZBORNIK_OPTIONS,
+    EXECUTE_DB_QUERY_OPTIONS,
     MANAGER_OPTIONS,
     RUN_CHAT_OPTIONS,
     RUN_STUB_OPTIONS,
+    STORE_TASK_OPTIONS,
     TESTER_OPTIONS,
 )
 
@@ -27,9 +29,13 @@ __all__ = [
     "developer_zbornik_activity",
     "devops_zbornik_activity",
     "manager_activity",
+    "parse_intent_activity",
     "run_project_stub_activity",
     "run_claude_chat_activity",
     "capture_lesson",
+    "store_task",
+    "list_tasks",
+    "execute_db_query",
     "ClaudeActivityInput",
     "ClaudeActivityOutput",
     "DEVELOPER_OPTIONS",
@@ -39,5 +45,7 @@ __all__ = [
     "MANAGER_OPTIONS",
     "RUN_STUB_OPTIONS",
     "RUN_CHAT_OPTIONS",
+    "STORE_TASK_OPTIONS",
+    "EXECUTE_DB_QUERY_OPTIONS",
     "CAPTURE_LESSON_OPTIONS",
 ]
