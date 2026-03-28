@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from temporalio import activity
 
 # Module-level constant — patchable in tests
-DB_URL: str = os.environ.get("HITL_DB_URL", "sqlite:///tmp/hitl.db")
+DB_URL: str = os.environ.get("HITL_DB_URL", "sqlite:////tmp/hitl.db")
 
 # Only these tables are allowed in execute_db_query
 WHITELIST_TABLES = {"tasks"}

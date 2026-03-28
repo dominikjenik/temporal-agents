@@ -43,16 +43,16 @@ async def main() -> None:
     # Connect to local Temporal server
     client = await Client.connect("localhost:7233")
 
-    # Start worker and keep it running until interrupted (graceful shutdown via async with)
-    async with Worker(
+    # Use worker.run() directly — async with + run() causes double validate() → Rust panic
+    worker = Worker(
         client,
         task_queue="temporal-agents",
         workflows=WORKFLOWS,
         activities=ACTIVITIES,
         max_concurrent_activities=5,
-    ) as worker:
-        print("Worker started, task_queue=temporal-agents, max_concurrent_activities=5")
-        await worker.run()
+    )
+    print("Worker started, task_queue=temporal-agents, max_concurrent_activities=5")
+    await worker.run()
 
 
 if __name__ == "__main__":

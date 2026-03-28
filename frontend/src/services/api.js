@@ -10,7 +10,7 @@ const resolveRequestTimeout = () => {
     return 15000;
 };
 
-const REQUEST_TIMEOUT_MS = resolveRequestTimeout(); // default to 15s, overridable via Vite env
+const REQUEST_TIMEOUT_MS = resolveRequestTimeout();
 
 class ApiError extends Error {
     constructor(message, status) {
@@ -24,7 +24,7 @@ async function handleResponse(response) {
     if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new ApiError(
-            errorData.message || 'An error occurred',
+            errorData.detail || errorData.message || 'An error occurred',
             response.status
         );
     }
@@ -48,18 +48,15 @@ async function fetchWithTimeout(url, options = {}, timeout = REQUEST_TIMEOUT_MS)
 }
 
 export const apiService = {
+    // Chat (ClaudeChatWorkflow)
+
     async getConversationHistory() {
         try {
-            const res = await fetchWithTimeout(`${API_BASE_URL}/get-conversation-history`);
+            const res = await fetchWithTimeout(`${API_BASE_URL}/chat/history`);
             return handleResponse(res);
         } catch (error) {
-            if (error instanceof ApiError) {
-                throw error;
-            }
-            throw new ApiError(
-                'Failed to fetch conversation history',
-                error.status || 500
-            );
+            if (error instanceof ApiError) throw error;
+            throw new ApiError('Failed to fetch conversation history', error.status || 500);
         }
     },
 
@@ -67,80 +64,54 @@ export const apiService = {
         if (!message?.trim()) {
             throw new ApiError('Message cannot be empty', 400);
         }
-
         try {
             const res = await fetchWithTimeout(
-                `${API_BASE_URL}/send-prompt?prompt=${encodeURIComponent(message)}`,
-                { 
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
-                }
+                `${API_BASE_URL}/chat/prompt?prompt=${encodeURIComponent(message)}`,
+                { method: 'POST', headers: { 'Content-Type': 'application/json' } }
             );
             return handleResponse(res);
         } catch (error) {
-            if (error instanceof ApiError) {
-                throw error;
-            }
-            throw new ApiError(
-                'Failed to send message',
-                error.status || 500
-            );
+            if (error instanceof ApiError) throw error;
+            throw new ApiError('Failed to send message', error.status || 500);
         }
     },
 
     async startWorkflow() {
         try {
             const res = await fetchWithTimeout(
-                `${API_BASE_URL}/start-workflow`,
-                { 
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
-                }
+                `${API_BASE_URL}/chat/start`,
+                { method: 'POST', headers: { 'Content-Type': 'application/json' } }
             );
             return handleResponse(res);
         } catch (error) {
-            if (error instanceof ApiError) {
-                throw error;
-            }
-            throw new ApiError(
-                'Failed to start workflow',
-                error.status || 500
-            );
+            if (error instanceof ApiError) throw error;
+            throw new ApiError('Failed to start workflow', error.status || 500);
         }
     },
 
-    async confirm() {
-        try {
-            const res = await fetchWithTimeout(`${API_BASE_URL}/confirm`, { 
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-            return handleResponse(res);
-        } catch (error) {
-            if (error instanceof ApiError) {
-                throw error;
-            }
-            throw new ApiError(
-                'Failed to confirm action',
-                error.status || 500
-            );
-        }
-    },
-
-    async startManager(project, task, requireConfirm = true) {
+    async endChat() {
         try {
             const res = await fetchWithTimeout(
-                `${API_BASE_URL}/start-manager`,
+                `${API_BASE_URL}/chat/end`,
+                { method: 'POST', headers: { 'Content-Type': 'application/json' } }
+            );
+            return handleResponse(res);
+        } catch (error) {
+            if (error instanceof ApiError) throw error;
+            throw new ApiError('Failed to end chat', error.status || 500);
+        }
+    },
+
+    // Manager (ManagerWorkflow)
+
+    async startManager(userMessage) {
+        try {
+            const res = await fetchWithTimeout(
+                `${API_BASE_URL}/manager/start`,
                 {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ project, task, require_confirm: requireConfirm })
+                    body: JSON.stringify({ user_message: userMessage })
                 }
             );
             return handleResponse(res);
@@ -150,36 +121,10 @@ export const apiService = {
         }
     },
 
-    async managerConfirm(workflowId) {
-        try {
-            const res = await fetchWithTimeout(
-                `${API_BASE_URL}/manager-confirm/${encodeURIComponent(workflowId)}`,
-                { method: 'POST', headers: { 'Content-Type': 'application/json' } }
-            );
-            return handleResponse(res);
-        } catch (error) {
-            if (error instanceof ApiError) throw error;
-            throw new ApiError('Failed to confirm manager workflow', error.status || 500);
-        }
-    },
-
-    async managerCancel(workflowId) {
-        try {
-            const res = await fetchWithTimeout(
-                `${API_BASE_URL}/manager-cancel/${encodeURIComponent(workflowId)}`,
-                { method: 'POST', headers: { 'Content-Type': 'application/json' } }
-            );
-            return handleResponse(res);
-        } catch (error) {
-            if (error instanceof ApiError) throw error;
-            throw new ApiError('Failed to cancel manager workflow', error.status || 500);
-        }
-    },
-
     async managerStatus(workflowId) {
         try {
             const res = await fetchWithTimeout(
-                `${API_BASE_URL}/manager-status/${encodeURIComponent(workflowId)}`
+                `${API_BASE_URL}/manager/${encodeURIComponent(workflowId)}/status`
             );
             return handleResponse(res);
         } catch (error) {
@@ -188,28 +133,15 @@ export const apiService = {
         }
     },
 
-    async managerTerminate(workflowId) {
+    async managerResult(workflowId) {
         try {
             const res = await fetchWithTimeout(
-                `${API_BASE_URL}/manager-terminate/${encodeURIComponent(workflowId)}`,
-                { method: 'POST', headers: { 'Content-Type': 'application/json' } }
+                `${API_BASE_URL}/manager/${encodeURIComponent(workflowId)}/result`
             );
             return handleResponse(res);
         } catch (error) {
             if (error instanceof ApiError) throw error;
-            throw new ApiError('Failed to terminate workflow', error.status || 500);
+            throw new ApiError('Failed to fetch manager result', error.status || 500);
         }
     },
-
-    async managerPlan(workflowId) {
-        try {
-            const res = await fetchWithTimeout(
-                `${API_BASE_URL}/manager-plan/${encodeURIComponent(workflowId)}`
-            );
-            return handleResponse(res);
-        } catch (error) {
-            if (error instanceof ApiError) throw error;
-            throw new ApiError('Failed to fetch manager plan', error.status || 500);
-        }
-    }
 };

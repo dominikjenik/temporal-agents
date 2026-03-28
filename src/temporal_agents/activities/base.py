@@ -1,7 +1,16 @@
 import asyncio
+import json
+import os
+from pathlib import Path
 
 from pydantic import BaseModel
 from temporalio import activity
+
+# Project root — works regardless of cwd
+_AGENTS_DIR = Path(__file__).parents[3] / "agents"
+
+# Runner: "claude" or "cline" — set via TEMPORAL_RUNNER env var or .env file
+TEMPORAL_RUNNER: str = os.environ.get("TEMPORAL_RUNNER", "claude")
 
 
 class ClaudeActivityInput(BaseModel):
@@ -15,6 +24,31 @@ class ClaudeActivityOutput(BaseModel):
     exit_code: int
 
 
+def load_agent_prompt(agent_name: str) -> str:
+    """Load agent system prompt from agents/<agent_name>.md."""
+    path = _AGENTS_DIR / f"{agent_name}.md"
+    if not path.exists():
+        raise FileNotFoundError(f"Agent definition not found: {path}")
+    return path.read_text(encoding="utf-8").strip()
+
+
+def _build_cmd(task: str, system_prompt: str) -> list[str]:
+    """Build CLI command for the configured runner."""
+    runner = TEMPORAL_RUNNER
+    if runner == "cline":
+        # Cline has no --system-prompt flag — prepend to task
+        full_task = f"<instructions>\n{system_prompt}\n</instructions>\n\n{task}"
+        return ["cline", "task", "-a", "-y", "--json", full_task]
+    else:
+        # claude (default)
+        return [
+            "claude",
+            "--dangerously-skip-permissions",
+            "-p", task,
+            "--system-prompt", system_prompt,
+        ]
+
+
 async def _heartbeat_loop(interval: float = 30.0) -> None:
     """Send heartbeat every *interval* seconds until cancelled."""
     while True:
@@ -24,20 +58,14 @@ async def _heartbeat_loop(interval: float = 30.0) -> None:
 
 @activity.defn
 async def run_claude_activity(input: ClaudeActivityInput) -> ClaudeActivityOutput:
-    """Run `claude --dangerously-skip-permissions -p <agent_name> "<task>"` as subprocess.
-
-    A heartbeat task runs concurrently and calls activity.heartbeat() every 30 s so
-    Temporal knows the activity is still alive during long-running claude invocations.
-    """
-    # Send one immediate heartbeat so Temporal registers activity start
+    """Run agent via configured runner (claude or cline) with system prompt from agents/<agent_name>.md."""
     activity.heartbeat()
 
+    system_prompt = load_agent_prompt(input.agent_name)
+    cmd = _build_cmd(input.task, system_prompt)
+
     process = await asyncio.create_subprocess_exec(
-        "claude",
-        "--dangerously-skip-permissions",
-        "-p",
-        input.agent_name,
-        input.task,
+        *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -48,15 +76,39 @@ async def run_claude_activity(input: ClaudeActivityInput) -> ClaudeActivityOutpu
     try:
         stdout_bytes, _stderr_bytes = await process.communicate()
     finally:
-        # Cancel heartbeat task regardless of communicate() outcome
         heartbeat_task.cancel()
         try:
             await heartbeat_task
         except asyncio.CancelledError:
             pass
 
+    raw = stdout_bytes.decode("utf-8", errors="replace")
+    result = _parse_output(raw)
+
     return ClaudeActivityOutput(
-        result=stdout_bytes.decode("utf-8", errors="replace"),
+        result=result,
         success=(process.returncode == 0),
         exit_code=process.returncode,
     )
+
+
+def _parse_output(raw: str) -> str:
+    """Extract result text from runner output.
+
+    Claude: plain text → return as-is.
+    Cline --json: NDJSON events → extract completion_result text.
+    """
+    if TEMPORAL_RUNNER != "cline":
+        return raw.strip()
+
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+            if event.get("type") == "completion_result":
+                return event.get("text", "").strip()
+        except json.JSONDecodeError:
+            continue
+    return raw.strip()
