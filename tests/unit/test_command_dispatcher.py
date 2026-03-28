@@ -14,7 +14,7 @@ from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
 from temporal_agents.activities.hitl_db import Task
-from temporal_agents.workflows.command_dispatcher import CommandInput, CommandDispatcher, _format_tasks
+from temporal_agents.command_dispatcher import CommandInput, CommandDispatcher, _format_tasks
 
 _NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 

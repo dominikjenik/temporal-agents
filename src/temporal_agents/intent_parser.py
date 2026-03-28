@@ -14,7 +14,7 @@ from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
     from temporal_agents.activities.agents import parse_intent_activity
-    from temporal_agents.workflows.intent_config import INTENTS, PROJECTS
+    from temporal_agents.intent_config import INTENTS, PROJECTS
 
 
 def _validate(raw: str) -> tuple[bool, dict]:

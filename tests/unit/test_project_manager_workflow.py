@@ -19,7 +19,7 @@ from temporalio.worker import Worker
 import asyncio
 
 from temporal_agents.activities.hitl_db import Task
-from temporal_agents.workflows.command_dispatcher import CommandInput, CommandDispatcher
+from temporal_agents.command_dispatcher import CommandInput, CommandDispatcher
 
 
 async def _poll_query(handle, query_name: str, condition, timeout: float = 5.0):

@@ -11,8 +11,8 @@ from temporalio.client import Client
 from temporalio.exceptions import TemporalError
 
 from temporal_agents.activities.hitl_db import _fetch_tasks
-from temporal_agents.workflows.intent_parser import IntentParser
-from temporal_agents.workflows.command_dispatcher import CommandInput, CommandDispatcher
+from temporal_agents.intent_parser import IntentParser
+from temporal_agents.command_dispatcher import CommandInput, CommandDispatcher
 
 TASK_QUEUE = "temporal-agentic-workflow"
 

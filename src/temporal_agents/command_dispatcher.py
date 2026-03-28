@@ -3,7 +3,7 @@
 Flow:
   1. Receives pre-parsed {intent, project, user_message} from IntentParser
   2. Switch on intent:
-     - new_feature  -> projektaka HITL mock (duplicate check, confirm/comment signals)
+     - new_feature  -> project manager HITL mock (duplicate check, confirm/comment signals)
      - new_project  -> (not yet implemented)
      - unknown      -> capture_lesson, return error
 """
@@ -61,17 +61,18 @@ class CommandDispatcher:
             return json.dumps({"intent": "new_project", "project": input.project, "status": "not_implemented"})
 
         self._status = "done"
-        await workflow.execute_activity(
-            capture_lesson,
-            args=[
-                workflow.info().workflow_id,
-                "dispatcher",
-                "failure",
-                f"Unknown intent '{input.intent}' for project '{input.project}': '{input.user_message[:100]}'.",
-            ],
-            start_to_close_timeout=DB_TIMEOUT,
-            retry_policy=RETRY_ONCE,
-        )
+        # TODO
+        # await workflow.execute_activity(
+        #     capture_lesson,
+        #     args=[
+        #         workflow.info().workflow_id,
+        #         "dispatcher",
+        #         "failure",
+        #         f"Unknown intent '{input.intent}' for project '{input.project}': '{input.user_message[:100]}'.",
+        #     ],
+        #     start_to_close_timeout=DB_TIMEOUT,
+        #     retry_policy=RETRY_ONCE,
+        # )
         return f"Unknown intent: '{input.intent}'. Supported: new_feature, new_project."
 
     async def _handle_new_feature(self, project: str, user_message: str) -> str:

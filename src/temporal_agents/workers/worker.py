@@ -6,7 +6,7 @@ from temporalio.worker import Worker
 from temporal_agents.activities.agents import parse_intent_activity, run_claude_chat_activity
 from temporal_agents.activities.hitl_db import execute_db_query, list_tasks, store_task, update_task_status
 from temporal_agents.activities.lesson import capture_lesson
-from temporal_agents.workflows import CommandDispatcher, IntentParser
+from temporal_agents import CommandDispatcher, IntentParser
 
 WORKFLOWS = [IntentParser, CommandDispatcher]
 ACTIVITIES = [
