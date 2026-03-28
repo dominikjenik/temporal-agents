@@ -1,5 +1,4 @@
 temporal. zadefinujme manazera - potrebujeme aby z poz8adacky pouzivatela extrahoval intent teda zamer, to bude rozhodovat o nasom flowe dalej,  zadefinujme prvy intent - project_status - ak sa koncovy uzivatel opyta "co na praci/co je nove/aku mame robotu". tento intent LLM managera vyparsuje ako JSON {intent:"project_status"}. Nasledne ho spracovava v tomto pripade temporal a namiesto dalsieho volania LLM v tomto pripade len vypise z tabulky tasks usporiadany zoznam podla priority projektu. Dva testy - prvy pokryva prvu cast - LLM, druhy pokryva temporal volanie DB.
-
 | test_parse_intent_returns_project_status[co na praci-project_status]
 | test_parse_intent_returns_project_status[co je nove-project_status]
 | test_parse_intent_returns_project_status[aku mame robotu-project_status]
@@ -19,3 +18,22 @@ temporal. zadefinujme manazera - potrebujeme aby z poz8adacky pouzivatela extrah
 | TestExecuteDbQuery::test_query_with_filter
 | TestStoreTaskOptions::test_store_task_options_timeout
 | TestExecuteDbQueryOptions::test_execute_db_query_options_timeout
+| test_extract_intent_parses_llm_output[{"intent": "project_status"}-project_status]
+| test_extract_intent_parses_llm_output[```json\n{"intent": "project_status"}\n```-project_status]
+| test_extract_intent_parses_llm_output[{"intent": "unknown"}-unknown]
+| test_extract_intent_parses_llm_output[some garbage output-unknown]
+| test_extract_intent_parses_llm_output[Sure! {"intent": "project_status"} here you go-project_status]
+nova poziadavka: new_feature intent → projektak agent → HITL do DB → confirm signal → resolved. UI: task list (polling 1s, HITL bliká), detail panel s OK / Komentovať buttonmi.
+upresnenie: (1) ManagerWorkflow vracia "Požiadavka odoslaná projektovému manažérovi." (2) ProjectakWorkflow vracia JSON {intent:"duplicate", payload:"..."} — rovnaký formát ako manager. (3) kontext window: v detail paneli prebieha konverzácia priamo s projektakom cez comment signal + get_comments query; Komentovať button posiela komentár, odpoveď sa zobrazí v chate.
+| test_projektak_confirm_returns_duplicate_json
+| test_projektak_stores_hitl_and_updates_status
+| test_projektak_handles_comment_then_confirm
+| test_manager_routes_new_feature
+nova poziadavka: format check a learning loop. (1) Ak manager alebo projektak nevrátia odpoveď v očakávanom formáte (intent=unknown), Temporal workflow automaticky volá capture_lesson aktivitu — vznikne learning request pre daný projekt. (2) capture_lesson zapisuje do DB tabuľky tasks (project=temporal, type=lesson, status=pending) — nie do súboru. Používateľ systému vidí lesson v task liste a môže sa rozhodnúť kedy ju adresovať. (3) Model manažérskych agentov je definovaný v frontmatter agent súboru (agents/manager.md: model: claude-haiku-4-5-20251001), nie ako OS premenná — model je súčasť definície agenta a platí dlhodobo. (4) retry_policy maximum_attempts=1 pre všetky aktivity v ManagerWorkflow a ProjectakWorkflow — zabraňuje zacykleniu pri chybách počas debugovania.
+| test_unknown_intent_triggers_capture_lesson
+| TestCaptureLessonWritesToDB::test_inserts_lesson_row
+| TestCaptureLessonHeartbeat::test_heartbeat_called
+| TestCaptureLessonOutcomeInTitle::test_outcome_in_title[success]
+| TestCaptureLessonOutcomeInTitle::test_outcome_in_title[failure]
+nova poziadavka: end-to-end pipeline — vstup "nova feature temporal projektu - pridaj UI button ok" musí prejsť celým reťazcom: Manager resolvne intent new_feature, spustí ProjectakWorkflow ako child (ABANDON), Projektak zapíše HITL task do DB a čaká na confirm signál (stav waiting_hitl). Timeout pri skutočnom LLM volaní bol dôvodom zlyhania — pokryté unit testom s mocknutým parse_intent.
+| test_new_feature_message_full_pipeline

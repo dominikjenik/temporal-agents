@@ -31,14 +31,14 @@ class TestStoreTask:
             result = await store_task(project="zbornik", title="Fix crash")
 
         import uuid
-        from datetime import datetime
         assert result.project == "zbornik"
         assert result.title == "Fix crash"
         assert result.type == "task"
         assert result.workflow_id is None
         assert result.status == "pending"
         assert isinstance(result.id, uuid.UUID)
-        assert isinstance(result.created_at, datetime)
+        assert isinstance(result.created_at, str)
+        assert "T" in result.created_at  # ISO format
 
     async def test_store_hitl_task(self, tmp_path):
         db_url = f"sqlite:///{tmp_path}/tasks.db"

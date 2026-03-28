@@ -45,9 +45,9 @@ class Task(BaseModel):
     title: str
     priority: int = 5
     status: Literal['pending', 'in_progress', 'done', 'confirmed', 'cancelled'] = 'pending'
-    type: Literal['task', 'hitl'] = 'task'
+    type: Literal['task', 'hitl', 'lesson'] = 'task'
     workflow_id: Optional[str] = None
-    created_at: datetime
+    created_at: str
 
 
 class DBQuery(BaseModel):
@@ -84,20 +84,24 @@ async def store_task(
         status='pending',
         type=type,
         workflow_id=workflow_id,
-        created_at=now,
+        created_at=now.isoformat(),
     )
 
 
-@activity.defn
-async def list_tasks(status: str = 'pending') -> list[Task]:
-    """Return tasks filtered by status, sorted by priority ASC then project ASC."""
+async def _fetch_tasks(status: Optional[str] = None) -> list[Task]:
+    """Fetch tasks from DB. If status is None, return all tasks."""
     async with aiosqlite.connect(_db_path()) as db:
         await _init_db(db)
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute(
-            "SELECT * FROM tasks WHERE status = ? ORDER BY priority ASC, project ASC",
-            (status,)
-        )
+        if status:
+            cursor = await db.execute(
+                "SELECT * FROM tasks WHERE status = ? ORDER BY priority ASC, project ASC",
+                (status,)
+            )
+        else:
+            cursor = await db.execute(
+                "SELECT * FROM tasks ORDER BY priority ASC, project ASC"
+            )
         rows = await cursor.fetchall()
     return [
         Task(
@@ -108,10 +112,28 @@ async def list_tasks(status: str = 'pending') -> list[Task]:
             status=row['status'],
             type=row['type'],
             workflow_id=row['workflow_id'],
-            created_at=datetime.fromisoformat(row['created_at'])
+            created_at=row['created_at']
         )
         for row in rows
     ]
+
+
+@activity.defn
+async def list_tasks(status: str = 'pending') -> list[Task]:
+    """Return tasks filtered by status, sorted by priority ASC then project ASC."""
+    return await _fetch_tasks(status)
+
+
+@activity.defn
+async def update_task_status(workflow_id: str, status: str) -> None:
+    """Update task status by workflow_id."""
+    async with aiosqlite.connect(_db_path()) as db:
+        await _init_db(db)
+        await db.execute(
+            "UPDATE tasks SET status = ? WHERE workflow_id = ?",
+            (status, workflow_id)
+        )
+        await db.commit()
 
 
 @activity.defn

@@ -12,6 +12,29 @@ _AGENTS_DIR = Path(__file__).parents[3] / "agents"
 # Runner: "claude" or "cline" — set via TEMPORAL_RUNNER env var or .env file
 TEMPORAL_RUNNER: str = os.environ.get("TEMPORAL_RUNNER", "claude")
 
+def _parse_frontmatter(text: str) -> tuple[dict, str]:
+    """Parse simple key: value frontmatter delimited by ---. Returns (meta, body)."""
+    if not text.startswith("---"):
+        return {}, text
+    end = text.find("\n---", 3)
+    if end == -1:
+        return {}, text
+    meta: dict = {}
+    for line in text[3:end].splitlines():
+        if ":" in line:
+            k, _, v = line.partition(":")
+            meta[k.strip()] = v.strip()
+    return meta, text[end + 4:].strip()
+
+
+def load_agent_model(agent_name: str) -> str:
+    """Return model ID from agent frontmatter, or empty string if not specified."""
+    path = _AGENTS_DIR / f"{agent_name}.md"
+    if not path.exists():
+        return ""
+    meta, _ = _parse_frontmatter(path.read_text(encoding="utf-8").strip())
+    return meta.get("model", "")
+
 
 class ClaudeActivityInput(BaseModel):
     agent_name: str
@@ -25,14 +48,15 @@ class ClaudeActivityOutput(BaseModel):
 
 
 def load_agent_prompt(agent_name: str) -> str:
-    """Load agent system prompt from agents/<agent_name>.md."""
+    """Load agent system prompt body (without frontmatter) from agents/<agent_name>.md."""
     path = _AGENTS_DIR / f"{agent_name}.md"
     if not path.exists():
         raise FileNotFoundError(f"Agent definition not found: {path}")
-    return path.read_text(encoding="utf-8").strip()
+    _, body = _parse_frontmatter(path.read_text(encoding="utf-8").strip())
+    return body
 
 
-def _build_cmd(task: str, system_prompt: str) -> list[str]:
+def _build_cmd(task: str, system_prompt: str, model: str = "") -> list[str]:
     """Build CLI command for the configured runner."""
     runner = TEMPORAL_RUNNER
     if runner == "cline":
@@ -40,13 +64,15 @@ def _build_cmd(task: str, system_prompt: str) -> list[str]:
         full_task = f"<instructions>\n{system_prompt}\n</instructions>\n\n{task}"
         return ["cline", "task", "-a", "-y", "--json", full_task]
     else:
-        # claude (default)
-        return [
+        cmd = [
             "claude",
             "--dangerously-skip-permissions",
             "-p", task,
             "--system-prompt", system_prompt,
         ]
+        if model:
+            cmd += ["--model", model]
+        return cmd
 
 
 async def _heartbeat_loop(interval: float = 30.0) -> None:
@@ -62,7 +88,8 @@ async def run_claude_activity(input: ClaudeActivityInput) -> ClaudeActivityOutpu
     activity.heartbeat()
 
     system_prompt = load_agent_prompt(input.agent_name)
-    cmd = _build_cmd(input.task, system_prompt)
+    model = load_agent_model(input.agent_name)
+    cmd = _build_cmd(input.task, system_prompt, model)
 
     process = await asyncio.create_subprocess_exec(
         *cmd,

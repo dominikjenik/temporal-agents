@@ -14,15 +14,17 @@ from temporal_agents.activities.agents import (
     tester_activity,
 )
 from temporal_agents.activities.base import run_claude_activity
-from temporal_agents.activities.hitl_db import execute_db_query, list_tasks, store_task
+from temporal_agents.activities.hitl_db import execute_db_query, list_tasks, store_task, update_task_status
+from temporal_agents.activities.lesson import capture_lesson
 from temporal_agents.workflows import (
     ClaudeChatWorkflow,
     FeatureWorkflow,
     ManagerWorkflow,
     ProjectWorkflow,
+    ProjectakWorkflow,
 )
 
-WORKFLOWS = [ClaudeChatWorkflow, FeatureWorkflow, ManagerWorkflow, ProjectWorkflow]
+WORKFLOWS = [ClaudeChatWorkflow, FeatureWorkflow, ManagerWorkflow, ProjectWorkflow, ProjectakWorkflow]
 ACTIVITIES = [
     developer_activity,
     tester_activity,
@@ -36,6 +38,8 @@ ACTIVITIES = [
     store_task,
     list_tasks,
     execute_db_query,
+    update_task_status,
+    capture_lesson,
 ]
 
 

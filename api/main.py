@@ -9,6 +9,7 @@ from temporalio.client import Client
 from temporalio.common import WorkflowIDReusePolicy
 from temporalio.exceptions import TemporalError
 
+from temporal_agents.activities.hitl_db import _fetch_tasks
 from temporal_agents.workflows.claude_chat_workflow import ClaudeChatWorkflow
 from temporal_agents.workflows.manager_workflow import ManagerInput, ManagerWorkflow
 
@@ -137,3 +138,53 @@ async def manager_result(workflow_id: str):
     handle = temporal_client.get_workflow_handle(workflow_id)
     result = await handle.result()
     return {"result": result}
+
+
+# ---------------------------------------------------------------------------
+# Tasks (DB)
+# ---------------------------------------------------------------------------
+
+@app.get("/tasks")
+async def get_tasks():
+    tasks = await _fetch_tasks()
+    return [t.model_dump() for t in tasks]
+
+
+# ---------------------------------------------------------------------------
+# HITL signals + state
+# ---------------------------------------------------------------------------
+
+class CommentRequest(BaseModel):
+    text: str
+
+
+@app.get("/hitl/{workflow_id}/state")
+async def hitl_state(workflow_id: str):
+    try:
+        handle = temporal_client.get_workflow_handle(workflow_id)
+        result = await handle.query("get_result")
+        comments = await handle.query("get_comments")
+        status = await handle.query("get_status")
+        return {"result": result, "comments": comments, "status": status}
+    except TemporalError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/hitl/{workflow_id}/confirm")
+async def hitl_confirm(workflow_id: str):
+    try:
+        handle = temporal_client.get_workflow_handle(workflow_id)
+        await handle.signal("confirm")
+        return {"status": "confirmed"}
+    except TemporalError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/hitl/{workflow_id}/comment")
+async def hitl_comment(workflow_id: str, body: CommentRequest):
+    try:
+        handle = temporal_client.get_workflow_handle(workflow_id)
+        await handle.signal("comment", body.text)
+        return {"status": "comment_sent"}
+    except TemporalError as e:
+        raise HTTPException(status_code=404, detail=str(e))

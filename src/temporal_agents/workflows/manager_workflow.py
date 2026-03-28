@@ -1,9 +1,10 @@
 """ManagerWorkflow — intent-based orchestrator.
 
 Flow:
-  1. parse_intent_activity(user_message) -> {intent: "project_status" | ...}
+  1. parse_intent_activity(user_message) -> {intent: "project_status" | "new_feature" | ...}
   2. Route by intent:
      - project_status -> list_tasks() -> return formatted list
+     - new_feature    -> start ProjectakWorkflow as child (ABANDON), return immediately
      - unknown        -> return "unknown intent" message
 """
 import json
@@ -12,12 +13,15 @@ from datetime import timedelta
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
+from temporalio.workflow import ParentClosePolicy
 
 with workflow.unsafe.imports_passed_through():
     from temporal_agents.activities.agents import parse_intent_activity
     from temporal_agents.activities.hitl_db import Task, list_tasks
+    from temporal_agents.activities.lesson import capture_lesson
+    from temporal_agents.workflows.projektak_workflow import ProjectakInput, ProjectakWorkflow
 
-INTENT_TIMEOUT = timedelta(seconds=30)
+INTENT_TIMEOUT = timedelta(seconds=60)
 DB_TIMEOUT = timedelta(seconds=10)
 
 
@@ -40,7 +44,7 @@ class ManagerWorkflow:
             parse_intent_activity,
             input.user_message,
             start_to_close_timeout=INTENT_TIMEOUT,
-            retry_policy=RetryPolicy(maximum_attempts=2),
+            retry_policy=RetryPolicy(maximum_attempts=1),
         )
         self._intent = json.loads(raw).get("intent", "unknown")
         workflow.logger.info(f"[Manager] intent={self._intent}")
@@ -52,13 +56,35 @@ class ManagerWorkflow:
                 list_tasks,
                 "pending",
                 start_to_close_timeout=DB_TIMEOUT,
-                retry_policy=RetryPolicy(maximum_attempts=2),
+                retry_policy=RetryPolicy(maximum_attempts=1),
             )
             self._status = "done"
             return _format_tasks(tasks)
 
+        if self._intent == "new_feature":
+            child_id = f"projektak-{workflow.info().workflow_id}"
+            await workflow.start_child_workflow(
+                ProjectakWorkflow.run,
+                ProjectakInput(user_message=input.user_message),
+                id=child_id,
+                parent_close_policy=ParentClosePolicy.ABANDON,
+            )
+            self._status = "done"
+            return "Požiadavka odoslaná projektovému manažérovi."
+
         self._status = "done"
-        return f"Unknown intent: '{self._intent}'. Supported: project_status."
+        await workflow.execute_activity(
+            capture_lesson,
+            args=[
+                workflow.info().workflow_id,
+                "manager",
+                "failure",
+                f"parse_intent returned 'unknown' for: '{input.user_message[:100]}'. Manager prompt may need improvement.",
+            ],
+            start_to_close_timeout=timedelta(seconds=10),
+            retry_policy=RetryPolicy(maximum_attempts=1),
+        )
+        return f"Unknown intent: '{self._intent}'. Supported: project_status, new_feature."
 
     @workflow.query
     def get_status(self) -> str:

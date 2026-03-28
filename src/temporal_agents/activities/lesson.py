@@ -1,10 +1,10 @@
+import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
+import aiosqlite
 from temporalio import activity
 
-# Module-level constant — patchable in tests
-PENDING_MD_PATH = Path(__file__).parent.parent.parent.parent.parent / "lessons" / "pending.md"
+from .hitl_db import _db_path, _init_db
 
 
 @activity.defn
@@ -14,18 +14,18 @@ async def capture_lesson(
     outcome: str,
     lesson_text: str,
 ) -> None:
-    """Append a lesson learned to lessons/pending.md."""
+    """Record a learning request as a 'lesson' task in the DB (project='temporal')."""
     activity.heartbeat()
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    entry = (
-        f"\n### {timestamp}\n"
-        f"- **workflow_id**: {workflow_id}\n"
-        f"- **agent_type**: {agent_type}\n"
-        f"- **outcome**: {outcome}\n"
-        f"- **lesson_text**: {lesson_text}\n"
-        f"\n---\n"
-    )
+    record_id = uuid.uuid4()
+    now = datetime.now(timezone.utc).isoformat()
+    title = f"[{outcome.upper()}] {agent_type}: {lesson_text[:120]}"
 
-    with open(PENDING_MD_PATH, "a", encoding="utf-8") as f:
-        f.write(entry)
+    async with aiosqlite.connect(_db_path()) as db:
+        await _init_db(db)
+        await db.execute(
+            "INSERT INTO tasks (id, project, title, priority, status, type, workflow_id, created_at) "
+            "VALUES (?, ?, ?, ?, 'pending', 'lesson', ?, ?)",
+            (str(record_id), "temporal", title, 5, workflow_id, now),
+        )
+        await db.commit()

@@ -144,4 +144,56 @@ export const apiService = {
             throw new ApiError('Failed to fetch manager result', error.status || 500);
         }
     },
+
+    async getTasks() {
+        try {
+            const res = await fetchWithTimeout(`${API_BASE_URL}/tasks`);
+            return handleResponse(res);
+        } catch (error) {
+            if (error instanceof ApiError) throw error;
+            throw new ApiError('Failed to fetch tasks', error.status || 500);
+        }
+    },
+
+    async getHitlState(workflowId) {
+        try {
+            const res = await fetchWithTimeout(
+                `${API_BASE_URL}/hitl/${encodeURIComponent(workflowId)}/state`
+            );
+            return handleResponse(res);
+        } catch (error) {
+            if (error instanceof ApiError) throw error;
+            throw new ApiError('Failed to fetch HITL state', error.status || 500);
+        }
+    },
+
+    async confirmHitl(workflowId) {
+        try {
+            const res = await fetchWithTimeout(
+                `${API_BASE_URL}/hitl/${encodeURIComponent(workflowId)}/confirm`,
+                { method: 'POST' }
+            );
+            return handleResponse(res);
+        } catch (error) {
+            if (error instanceof ApiError) throw error;
+            throw new ApiError('Failed to confirm HITL', error.status || 500);
+        }
+    },
+
+    async commentHitl(workflowId, text) {
+        try {
+            const res = await fetchWithTimeout(
+                `${API_BASE_URL}/hitl/${encodeURIComponent(workflowId)}/comment`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text })
+                }
+            );
+            return handleResponse(res);
+        } catch (error) {
+            if (error instanceof ApiError) throw error;
+            throw new ApiError('Failed to send comment', error.status || 500);
+        }
+    },
 };

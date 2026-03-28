@@ -5,7 +5,7 @@ import re
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
-from .base import ClaudeActivityInput, ClaudeActivityOutput, _heartbeat_loop, load_agent_prompt, run_claude_activity
+from .base import ClaudeActivityInput, ClaudeActivityOutput, _heartbeat_loop, load_agent_model, load_agent_prompt, run_claude_activity
 
 
 @activity.defn
@@ -28,6 +28,18 @@ async def devops_zbornik_activity(task: str) -> ClaudeActivityOutput:
     return await run_claude_activity(ClaudeActivityInput(agent_name="devops-zbornik", task=task))
 
 
+def _extract_intent(raw: str) -> str:
+    """Parse intent JSON from LLM output. Pure function — testable without Temporal context."""
+    match = re.search(r'\{[^{}]*"intent"[^{}]*\}', raw)
+    if match:
+        try:
+            parsed = json.loads(match.group())
+            return json.dumps({"intent": parsed.get("intent", "unknown")})
+        except json.JSONDecodeError:
+            pass
+    return json.dumps({"intent": "unknown"})
+
+
 @activity.defn
 async def parse_intent_activity(user_message: str) -> str:
     """Extract intent from user message via claude -p (always, regardless of TEMPORAL_RUNNER).
@@ -37,26 +49,22 @@ async def parse_intent_activity(user_message: str) -> str:
     """
     activity.heartbeat()
     system_prompt = load_agent_prompt("manager")
-    process = await asyncio.create_subprocess_exec(
-        "claude",
-        "--dangerously-skip-permissions",
+    model = load_agent_model("manager")
+    cmd = [
+        "claude", "--dangerously-skip-permissions",
         "-p", user_message,
         "--system-prompt", system_prompt,
+    ]
+    if model:
+        cmd += ["--model", model]
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
     stdout_bytes, _ = await process.communicate()
     raw = stdout_bytes.decode("utf-8", errors="replace").strip()
-
-    # Try to extract JSON from the response (LLM may add markdown fences)
-    match = re.search(r'\{[^{}]*"intent"[^{}]*\}', raw)
-    if match:
-        try:
-            parsed = json.loads(match.group())
-            return json.dumps({"intent": parsed.get("intent", "unknown")})
-        except json.JSONDecodeError:
-            pass
-    return json.dumps({"intent": "unknown"})
+    return _extract_intent(raw)
 
 
 @activity.defn
