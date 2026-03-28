@@ -1,20 +1,9 @@
-"""IntentParser — accepts user messages via signals and resolves them to structured intent via LLM.
-
-Iterates with the user until intent + project are unambiguously identified.
-
-Signals:  user_prompt(str), end_chat()
-Queries:  get_conversation_history()
-"""
+"""IntentParser — plain Python LLM-based intent + project parser with clarification support."""
+import asyncio
 import json
-from datetime import timedelta
-from typing import Any, Dict, List, Optional
 
-from temporalio import workflow
-from temporalio.common import RetryPolicy
-
-with workflow.unsafe.imports_passed_through():
-    from temporal_agents.activities.agents import parse_intent_activity
-    from temporal_agents.intent_config import INTENTS, PROJECTS
+from temporal_agents.activities.base import _build_cmd, load_agent_model, load_agent_prompt
+from temporal_agents.intent_config import INTENTS, PROJECTS
 
 
 def _validate(raw: str) -> tuple[bool, dict]:
@@ -37,69 +26,30 @@ def _clarification_message(data: dict) -> str:
     return f"Nepodarilo sa určiť {' a '.join(missing)}. Môžeš to upresniť?"
 
 
-@workflow.defn
-class IntentParser:
-    """Accepts user messages via signals and resolves them to structured intent via LLM."""
+async def parse(message: str) -> dict:
+    """Call LLM intent_parser agent and return parsed intent.
 
-    def __init__(self) -> None:
-        self._messages: List[Dict[str, Any]] = []
-        self._pending: List[str] = []
-        self._ended: bool = False
-        self._result: Optional[str] = None
+    Returns:
+        {"intent": str, "project": str}  — on success
+        {"clarification": str}            — when intent or project is unclear
+    """
+    system_prompt = load_agent_prompt("intent_parser")
+    model = load_agent_model("intent_parser")
+    cmd = _build_cmd(message, system_prompt, model)
 
-    @workflow.run
-    async def run(self, initial_prompt: str = "") -> str:
-        if initial_prompt:
-            self._pending.append(initial_prompt)
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, _ = await asyncio.wait_for(process.communicate(), timeout=120)
+    except asyncio.TimeoutError:
+        process.kill()
+        return {"clarification": "Vypršal časový limit. Skús to znova."}
 
-        while not self._ended:
-            await workflow.wait_condition(
-                lambda: bool(self._pending) or self._ended
-            )
-
-            while self._pending and not self._ended:
-                prompt = self._pending.pop(0)
-                self._messages.append({
-                    "actor": "user",
-                    "response": {"response": prompt, "next": "question"},
-                })
-
-                raw = await workflow.execute_activity(
-                    parse_intent_activity,
-                    prompt,
-                    start_to_close_timeout=timedelta(minutes=2),
-                    retry_policy=RetryPolicy(maximum_attempts=2),
-                )
-
-                valid, data = _validate(raw)
-
-                if valid:
-                    self._result = raw
-                    self._ended = True
-                    self._messages.append({
-                        "actor": "agent",
-                        "response": {"response": raw, "next": "done"},
-                    })
-                    return raw
-
-                clarification = _clarification_message(data)
-                self._messages.append({
-                    "actor": "agent",
-                    "response": {"response": clarification, "next": "question"},
-                })
-
-        return self._result or json.dumps(
-            {"intent": "unknown", "project": "unknown", "confidence": 0}
-        )
-
-    @workflow.signal
-    async def user_prompt(self, prompt: str) -> None:
-        self._pending.append(prompt)
-
-    @workflow.signal
-    async def end_chat(self) -> None:
-        self._ended = True
-
-    @workflow.query
-    def get_conversation_history(self) -> Dict[str, List]:
-        return {"messages": list(self._messages)}
+    raw = stdout.decode().strip()
+    valid, data = _validate(raw)
+    if valid:
+        return {"intent": data["intent"], "project": data["project"]}
+    return {"clarification": _clarification_message(data)}

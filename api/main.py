@@ -11,8 +11,8 @@ from temporalio.client import Client
 from temporalio.exceptions import TemporalError
 
 from temporal_agents.activities.hitl_db import _fetch_tasks
-from temporal_agents.intent_parser import IntentParser
-from temporal_agents.command_dispatcher import CommandInput, CommandDispatcher
+from temporal_agents.intent_parser import parse as parse_intent
+from temporal_agents.command_dispatcher import dispatch
 
 TASK_QUEUE = "temporal-agentic-workflow"
 
@@ -48,73 +48,21 @@ def root():
 
 
 # ---------------------------------------------------------------------------
-# Chat (IntentParser)
+# IntentParser (API endpoint)
 # ---------------------------------------------------------------------------
 
-CHAT_WORKFLOW_ID = "chat-workflow"
+class ParseRequest(BaseModel):
+    message: str
 
 
-@app.post("/chat/start")
-async def chat_start():
-    await temporal_client.start_workflow(
-        IntentParser.run,
-        id=CHAT_WORKFLOW_ID,
-        task_queue=TASK_QUEUE,
-        id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
-    )
-    return {"workflow_id": CHAT_WORKFLOW_ID}
-
-
-@app.post("/chat/prompt")
-async def chat_prompt(prompt: str):
-    await temporal_client.start_workflow(
-        IntentParser.run,
-        id=CHAT_WORKFLOW_ID,
-        task_queue=TASK_QUEUE,
-        id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
-        start_signal="user_prompt",
-        start_signal_args=[prompt],
-    )
-    return {"message": "Prompt sent."}
-
-
-@app.post("/chat/end")
-async def chat_end():
-    try:
-        handle = temporal_client.get_workflow_handle(CHAT_WORKFLOW_ID)
-        await handle.signal("end_chat")
-        return {"message": "Chat ended."}
-    except TemporalError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-
-@app.get("/chat/history")
-async def chat_history():
-    failed_states = [
-        WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_TERMINATED,
-        WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_CANCELED,
-        WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_FAILED,
-    ]
-    try:
-        handle = temporal_client.get_workflow_handle(CHAT_WORKFLOW_ID)
-        description = await handle.describe()
-        if description.status in failed_states:
-            return []
-        history = await asyncio.wait_for(
-            handle.query("get_conversation_history"), timeout=5
-        )
-        return history
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="Query timed out.")
-    except TemporalError as e:
-        err = str(e)
-        if "workflow not found" in err or "sql: no rows" in err:
-            return []
-        raise HTTPException(status_code=500, detail=err)
+@app.post("/intent/parse")
+async def intent_parse(body: ParseRequest):
+    result = await parse_intent(body.message)
+    return result
 
 
 # ---------------------------------------------------------------------------
-# Manager (CommandDispatcher)
+# Manager (CommandDispatcher → FeatureWorkflow / ...)
 # ---------------------------------------------------------------------------
 
 class ManagerRequest(BaseModel):
@@ -127,14 +75,19 @@ class ManagerRequest(BaseModel):
 async def manager_start(body: ManagerRequest):
     ts = int(time.time() * 1000)
     slug = body.user_message[:24].replace(' ', '-')
-    workflow_id = f"manager-{ts}-{slug}"
+    workflow_id = f"{body.intent}-{ts}-{slug}"
     try:
+        wf_class, wf_input = dispatch(body.intent, body.project, body.user_message)
         await temporal_client.start_workflow(
-            CommandDispatcher.run,
-            CommandInput(intent=body.intent, project=body.project, user_message=body.user_message),
+            wf_class.run,
+            wf_input,
             id=workflow_id,
             task_queue=TASK_QUEUE,
         )
+    except NotImplementedError as e:
+        raise HTTPException(status_code=501, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except TemporalError as e:
         raise HTTPException(status_code=500, detail=str(e))
     return {"workflow_id": workflow_id}
