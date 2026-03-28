@@ -102,7 +102,7 @@ export const apiService = {
         }
     },
 
-    // Manager (ManagerWorkflow)
+    // Manager (BaseWorkflow)
 
     async startManager(userMessage) {
         try {

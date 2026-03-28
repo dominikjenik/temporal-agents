@@ -4,28 +4,7 @@ import json
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
-from .base import ClaudeActivityInput, ClaudeActivityOutput, _heartbeat_loop, run_claude_activity
-
-
-@activity.defn
-async def developer_activity(task: str) -> ClaudeActivityOutput:
-    return await run_claude_activity(ClaudeActivityInput(agent_name="developer", task=task))
-
-
-@activity.defn
-async def tester_activity(task: str) -> ClaudeActivityOutput:
-    return await run_claude_activity(ClaudeActivityInput(agent_name="tester", task=task))
-
-
-@activity.defn
-async def developer_zbornik_activity(task: str) -> ClaudeActivityOutput:
-    return await run_claude_activity(ClaudeActivityInput(agent_name="developer-zbornik", task=task))
-
-
-@activity.defn
-async def devops_zbornik_activity(task: str) -> ClaudeActivityOutput:
-    return await run_claude_activity(ClaudeActivityInput(agent_name="devops-zbornik", task=task))
-
+from .base import _heartbeat_loop
 
 
 _STATUS_KEYWORDS = [
@@ -46,18 +25,6 @@ async def parse_intent_activity(user_message: str) -> str:
         if kw in msg:
             return json.dumps({"intent": "project_status"})
     return json.dumps({"intent": "new_feature"})
-
-
-@activity.defn
-async def manager_activity(task: str) -> ClaudeActivityOutput:
-    return await run_claude_activity(ClaudeActivityInput(agent_name="manager", task=task))
-
-
-@activity.defn
-async def run_project_stub_activity(project: str, task: str) -> str:
-    """Stub — simulates project execution without running real agents."""
-    activity.logger.info(f"[stub] project={project} task={task[:80]}")
-    return f"[stub] {project}: done"
 
 
 @activity.defn

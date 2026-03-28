@@ -8,12 +8,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from temporalio.api.enums.v1 import EventType, WorkflowExecutionStatus
 from temporalio.client import Client
-from temporalio.common import WorkflowIDReusePolicy
 from temporalio.exceptions import TemporalError
 
 from temporal_agents.activities.hitl_db import _fetch_tasks
 from temporal_agents.workflows.claude_chat_workflow import ClaudeChatWorkflow
-from temporal_agents.workflows.manager_workflow import ManagerInput, ManagerWorkflow
+from temporal_agents.workflows.base_workflow import BaseInput, BaseWorkflow
 
 TASK_QUEUE = "temporal-agents"
 
@@ -115,7 +114,7 @@ async def chat_history():
 
 
 # ---------------------------------------------------------------------------
-# Manager (ManagerWorkflow)
+# Manager (BaseWorkflow)
 # ---------------------------------------------------------------------------
 
 class ManagerRequest(BaseModel):
@@ -129,8 +128,8 @@ async def manager_start(body: ManagerRequest):
     workflow_id = f"manager-{ts}-{slug}"
     try:
         await temporal_client.start_workflow(
-            ManagerWorkflow.run,
-            ManagerInput(user_message=body.user_message),
+            BaseWorkflow.run,
+            BaseInput(user_message=body.user_message),
             id=workflow_id,
             task_queue=TASK_QUEUE,
         )
@@ -329,24 +328,7 @@ async def hitl_history(workflow_id: str):
     try:
         handle = temporal_client.get_workflow_handle(workflow_id)
         history = await handle.fetch_history()
-
-        # Derive parent (manager) workflow ID from naming convention:
-        # projektak ID is always "projektak-{manager_workflow_id}"
-        parent_wf_id = workflow_id[len("projektak-"):] if workflow_id.startswith("projektak-") else None
-
-        all_events: list[dict] = []
-
-        # Prepend parent (manager) history so intent resolution is visible first
-        if parent_wf_id:
-            try:
-                parent_history = await temporal_client.get_workflow_handle(parent_wf_id).fetch_history()
-                all_events.extend(_parse_history_events(parent_history.events, "manager"))
-            except Exception:
-                pass
-
-        all_events.extend(_parse_history_events(history.events, "projektak"))
-        return {"events": all_events}
-
+        return {"events": _parse_history_events(history.events, "manager")}
     except TemporalError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:

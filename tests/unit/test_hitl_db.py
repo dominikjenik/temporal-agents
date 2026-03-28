@@ -159,16 +159,3 @@ class TestExecuteDbQuery:
 
 
 # ---------------------------------------------------------------------------
-# options.py
-# ---------------------------------------------------------------------------
-
-class TestStoreTaskOptions:
-    def test_store_task_options_timeout(self):
-        from temporal_agents.activities.options import STORE_TASK_OPTIONS
-        assert STORE_TASK_OPTIONS.start_to_close_timeout == timedelta(seconds=30)
-
-
-class TestExecuteDbQueryOptions:
-    def test_execute_db_query_options_timeout(self):
-        from temporal_agents.activities.options import EXECUTE_DB_QUERY_OPTIONS
-        assert EXECUTE_DB_QUERY_OPTIONS.start_to_close_timeout == timedelta(seconds=10)

@@ -3,51 +3,25 @@ import asyncio
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from temporal_agents.activities.agents import (
-    developer_activity,
-    developer_zbornik_activity,
-    devops_zbornik_activity,
-    manager_activity,
-    parse_intent_activity,
-    run_claude_chat_activity,
-    run_project_stub_activity,
-    tester_activity,
-)
-from temporal_agents.activities.base import run_claude_activity
+from temporal_agents.activities.agents import parse_intent_activity, run_claude_chat_activity
 from temporal_agents.activities.hitl_db import execute_db_query, list_tasks, store_task, update_task_status
 from temporal_agents.activities.lesson import capture_lesson
-from temporal_agents.workflows import (
-    ClaudeChatWorkflow,
-    FeatureWorkflow,
-    ManagerWorkflow,
-    ProjectWorkflow,
-    ProjectakWorkflow,
-)
+from temporal_agents.workflows import BaseWorkflow, ClaudeChatWorkflow
 
-WORKFLOWS = [ClaudeChatWorkflow, FeatureWorkflow, ManagerWorkflow, ProjectWorkflow, ProjectakWorkflow]
+WORKFLOWS = [ClaudeChatWorkflow, BaseWorkflow]
 ACTIVITIES = [
-    developer_activity,
-    tester_activity,
-    developer_zbornik_activity,
-    devops_zbornik_activity,
-    manager_activity,
     parse_intent_activity,
-    run_project_stub_activity,
     run_claude_chat_activity,
-    run_claude_activity,
     store_task,
     list_tasks,
-    execute_db_query,
     update_task_status,
+    execute_db_query,
     capture_lesson,
 ]
 
 
 async def main() -> None:
-    # Connect to local Temporal server
     client = await Client.connect("localhost:7233")
-
-    # Use worker.run() directly — async with + run() causes double validate() → Rust panic
     worker = Worker(
         client,
         task_queue="temporal-agents",

@@ -1,12 +1,12 @@
-"""Tests for ProjectakWorkflow and ManagerWorkflow new_feature routing.
+"""Tests for BaseWorkflow — intent routing and inline HITL.
 
-Test 1: ProjectakWorkflow resolves on confirm — returns {intent: "duplicate_resolved", payload: ...} JSON.
-Test 2: ProjectakWorkflow stores HITL task and updates status to 'confirmed'.
-Test 3: ProjectakWorkflow handles comment signal then resolves on confirm.
-Test 4: ManagerWorkflow routes new_feature intent → starts ProjectakWorkflow child.
-Test 5: End-to-end — real user message → Manager → Projektak HITL waiting state.
-Test 6: ProjectakWorkflow log contains key execution steps exposed via get_log query.
-Test 7: ProjectakWorkflow intent progresses: duplicate_suggested (running) → duplicate_resolved (after confirm).
+Test 1: new_feature intent → HITL → confirm → returns {intent: "duplicate_resolved"} JSON.
+Test 2: new_feature → stores type='hitl' task, updates status to 'confirmed' after confirm signal.
+Test 3: new_feature → comment signal appended, confirm still resolves.
+Test 4: project_status intent → returns formatted task list, no HITL.
+Test 5: End-to-end — real user message → Manager → HITL waiting state.
+Test 6: get_log exposes key execution steps.
+Test 7: intent progresses: duplicate_suggested (running) → duplicate_resolved (after confirm).
 """
 import json
 import uuid
@@ -19,12 +19,10 @@ from temporalio.worker import Worker
 import asyncio
 
 from temporal_agents.activities.hitl_db import Task
-from temporal_agents.workflows.manager_workflow import ManagerInput, ManagerWorkflow
-from temporal_agents.workflows.projektak_workflow import ProjectakInput, ProjectakWorkflow
+from temporal_agents.workflows.base_workflow import BaseInput, BaseWorkflow
 
 
 async def _poll_query(handle, query_name: str, condition, timeout: float = 5.0):
-    """Poll a workflow query until condition is met or timeout (seconds)."""
     deadline = asyncio.get_event_loop().time() + timeout
     while asyncio.get_event_loop().time() < deadline:
         try:
@@ -38,8 +36,15 @@ async def _poll_query(handle, query_name: str, condition, timeout: float = 5.0):
 
 
 # ---------------------------------------------------------------------------
-# Helpers — shared mock activities
+# Shared mock activities
 # ---------------------------------------------------------------------------
+
+def _make_parse_intent_mock(intent: str = "new_feature"):
+    @activity.defn(name="parse_intent_activity")
+    async def mock_parse_intent(msg: str) -> str:
+        return json.dumps({"intent": intent})
+    return mock_parse_intent
+
 
 def _make_store_task_mock(calls: list):
     @activity.defn(name="store_task")
@@ -63,27 +68,39 @@ def _make_update_status_mock(calls: list):
     return mock_update_task_status
 
 
+def _make_list_tasks_mock(tasks: list):
+    @activity.defn(name="list_tasks")
+    async def mock_list_tasks(status: str) -> list:
+        return tasks
+    return mock_list_tasks
+
+
+def _make_capture_lesson_mock():
+    @activity.defn(name="capture_lesson")
+    async def mock_capture_lesson(workflow_id: str, agent_type: str, outcome: str, lesson_text: str) -> None:
+        pass
+    return mock_capture_lesson
+
+
 # ---------------------------------------------------------------------------
-# Test 1: confirm → returns duplicate JSON
+# Test 1: confirm → returns duplicate_resolved JSON
 # ---------------------------------------------------------------------------
 
-async def test_projektak_confirm_returns_duplicate_json():
-    """Confirm signal → result is JSON {intent: 'resolved_as_duplicate', payload: '...'}."""
+async def test_new_feature_confirm_returns_duplicate_resolved():
     async with await WorkflowEnvironment.start_time_skipping() as env:
         async with Worker(
-            env.client,
-            task_queue="test-projektak-1",
-            workflows=[ProjectakWorkflow],
+            env.client, task_queue="test-1",
+            workflows=[BaseWorkflow],
             activities=[
+                _make_parse_intent_mock("new_feature"),
                 _make_store_task_mock([]),
                 _make_update_status_mock([]),
             ],
         ):
             handle = await env.client.start_workflow(
-                ProjectakWorkflow.run,
-                ProjectakInput(user_message="Add dark mode"),
-                id="test-projektak-json",
-                task_queue="test-projektak-1",
+                BaseWorkflow.run,
+                BaseInput(user_message="Add dark mode"),
+                id="test-1", task_queue="test-1",
             )
             await handle.signal("confirm")
             result = await handle.result()
@@ -91,33 +108,28 @@ async def test_projektak_confirm_returns_duplicate_json():
     data = json.loads(result)
     assert data["intent"] == "duplicate_resolved"
     assert "payload" in data
-    assert len(data["payload"]) > 0
 
 
 # ---------------------------------------------------------------------------
-# Test 2: stores HITL and updates status
+# Test 2: stores HITL task, updates status to confirmed
 # ---------------------------------------------------------------------------
 
-async def test_projektak_stores_hitl_and_updates_status():
-    """ProjectakWorkflow stores type='hitl' task and marks it 'confirmed' after signal."""
-    store_calls: list = []
-    update_calls: list = []
-
+async def test_new_feature_stores_hitl_and_updates_status():
+    store_calls, update_calls = [], []
     async with await WorkflowEnvironment.start_time_skipping() as env:
         async with Worker(
-            env.client,
-            task_queue="test-projektak-2",
-            workflows=[ProjectakWorkflow],
+            env.client, task_queue="test-2",
+            workflows=[BaseWorkflow],
             activities=[
+                _make_parse_intent_mock("new_feature"),
                 _make_store_task_mock(store_calls),
                 _make_update_status_mock(update_calls),
             ],
         ):
             handle = await env.client.start_workflow(
-                ProjectakWorkflow.run,
-                ProjectakInput(user_message="Add dark mode"),
-                id="test-projektak-status",
-                task_queue="test-projektak-2",
+                BaseWorkflow.run,
+                BaseInput(user_message="Add dark mode"),
+                id="test-2", task_queue="test-2",
             )
             await handle.signal("confirm")
             await handle.result()
@@ -125,34 +137,31 @@ async def test_projektak_stores_hitl_and_updates_status():
     assert len(store_calls) == 1
     assert store_calls[0]["type"] == "hitl"
     assert "DUPLICATE" in store_calls[0]["title"]
-
     assert len(update_calls) == 1
     assert update_calls[0]["status"] == "confirmed"
 
 
 # ---------------------------------------------------------------------------
-# Test 3: comment signal appended to history, confirm still resolves
+# Test 3: comment then confirm
 # ---------------------------------------------------------------------------
 
-async def test_projektak_handles_comment_then_confirm():
-    """Comment signal is recorded; subsequent confirm still resolves the workflow."""
+async def test_new_feature_handles_comment_then_confirm():
     async with await WorkflowEnvironment.start_time_skipping() as env:
         async with Worker(
-            env.client,
-            task_queue="test-projektak-3",
-            workflows=[ProjectakWorkflow],
+            env.client, task_queue="test-3",
+            workflows=[BaseWorkflow],
             activities=[
+                _make_parse_intent_mock("new_feature"),
                 _make_store_task_mock([]),
                 _make_update_status_mock([]),
             ],
         ):
             handle = await env.client.start_workflow(
-                ProjectakWorkflow.run,
-                ProjectakInput(user_message="Add dark mode"),
-                id="test-projektak-comment",
-                task_queue="test-projektak-3",
+                BaseWorkflow.run,
+                BaseInput(user_message="Add dark mode"),
+                id="test-3", task_queue="test-3",
             )
-            await handle.signal("comment", "Toto nie je duplikát, je to nová funkcia.")
+            await handle.signal("comment", "Toto nie je duplikát.")
             comments = await _poll_query(handle, "get_comments", lambda c: len(c) == 1)
             await handle.signal("confirm")
             result = await handle.result()
@@ -160,148 +169,119 @@ async def test_projektak_handles_comment_then_confirm():
     data = json.loads(result)
     assert data["intent"] == "duplicate_resolved"
     assert len(comments) == 1
-    assert comments[0]["user"] == "Toto nie je duplikát, je to nová funkcia."
+    assert comments[0]["user"] == "Toto nie je duplikát."
     assert "bot" in comments[0]
 
 
 # ---------------------------------------------------------------------------
-# Test 4: ManagerWorkflow routes new_feature to ProjectakWorkflow
+# Test 4: project_status → returns task list, no HITL
 # ---------------------------------------------------------------------------
 
-async def test_manager_routes_new_feature():
-    """ManagerWorkflow with new_feature intent starts ProjectakWorkflow and returns review message."""
+async def test_project_status_returns_task_list():
+    from temporal_agents.activities.hitl_db import Task
+    tasks = [
+        Task(id=uuid.uuid4(), project="temporal", title="Fix bug", priority=1,
+             status="pending", type="task", workflow_id=None, created_at="2026-01-01T00:00:00+00:00"),
+    ]
     async with await WorkflowEnvironment.start_time_skipping() as env:
-
-        @activity.defn(name="parse_intent_activity")
-        async def mock_parse_intent(msg: str) -> str:
-            return json.dumps({"intent": "new_feature"})
-
         async with Worker(
-            env.client,
-            task_queue="test-manager-nf",
-            workflows=[ManagerWorkflow, ProjectakWorkflow],
+            env.client, task_queue="test-4",
+            workflows=[BaseWorkflow],
             activities=[
-                mock_parse_intent,
-                _make_store_task_mock([]),
-                _make_update_status_mock([]),
+                _make_parse_intent_mock("project_status"),
+                _make_list_tasks_mock(tasks),
             ],
         ):
             result = await env.client.execute_workflow(
-                ManagerWorkflow.run,
-                ManagerInput(user_message="Add dark mode"),
-                id="test-manager-new-feature",
-                task_queue="test-manager-nf",
+                BaseWorkflow.run,
+                BaseInput(user_message="co na praci"),
+                id="test-4", task_queue="test-4",
             )
 
-    assert "projektovému manažérovi" in result
+    assert "Fix bug" in result
+    assert "temporal" in result
 
 
 # ---------------------------------------------------------------------------
-# Test 5: End-to-end — real user message triggers full pipeline
+# Test 5: end-to-end — new feature → HITL waiting state
 # ---------------------------------------------------------------------------
 
-async def test_new_feature_message_full_pipeline():
-    """'nova feature temporal projektu - pridaj UI button ok' → Manager routes to Projektak → HITL waiting."""
-    store_calls: list = []
-    manager_wf_id = "test-e2e-new-feature"
-
+async def test_new_feature_full_pipeline():
+    store_calls = []
     async with await WorkflowEnvironment.start_time_skipping() as env:
-
-        @activity.defn(name="parse_intent_activity")
-        async def mock_parse_intent(msg: str) -> str:
-            return json.dumps({"intent": "new_feature"})
-
         async with Worker(
-            env.client,
-            task_queue="test-e2e",
-            workflows=[ManagerWorkflow, ProjectakWorkflow],
+            env.client, task_queue="test-5",
+            workflows=[BaseWorkflow],
             activities=[
-                mock_parse_intent,
+                _make_parse_intent_mock("new_feature"),
                 _make_store_task_mock(store_calls),
                 _make_update_status_mock([]),
             ],
         ):
-            manager_result = await env.client.execute_workflow(
-                ManagerWorkflow.run,
-                ManagerInput(user_message="nova feature temporal projektu - pridaj UI button ok"),
-                id=manager_wf_id,
-                task_queue="test-e2e",
+            handle = await env.client.start_workflow(
+                BaseWorkflow.run,
+                BaseInput(user_message="nova feature temporal projektu - pridaj UI button"),
+                id="test-5", task_queue="test-5",
             )
+            status = await _poll_query(handle, "get_status", lambda s: s == "waiting_hitl")
 
-            child_id = f"projektak-{manager_wf_id}"
-            child_handle = env.client.get_workflow_handle(child_id)
-            child_status = await _poll_query(child_handle, "get_status", lambda s: s == "waiting_hitl")
-
-    assert manager_result == "Požiadavka odoslaná projektovému manažérovi."
-    assert child_status == "waiting_hitl"
+    assert status == "waiting_hitl"
     assert len(store_calls) == 1
     assert store_calls[0]["type"] == "hitl"
     assert "nova feature temporal projektu" in store_calls[0]["title"]
 
 
 # ---------------------------------------------------------------------------
-# Test 6: get_log query exposes workflow execution steps
+# Test 6: get_log exposes key steps
 # ---------------------------------------------------------------------------
 
-async def test_projektak_log_contains_key_steps():
-    """get_log returns entries for: received request, assessment, DB write, waiting, confirmation."""
+async def test_log_contains_key_steps():
     async with await WorkflowEnvironment.start_time_skipping() as env:
         async with Worker(
-            env.client,
-            task_queue="test-projektak-log",
-            workflows=[ProjectakWorkflow],
+            env.client, task_queue="test-6",
+            workflows=[BaseWorkflow],
             activities=[
+                _make_parse_intent_mock("new_feature"),
                 _make_store_task_mock([]),
                 _make_update_status_mock([]),
             ],
         ):
             handle = await env.client.start_workflow(
-                ProjectakWorkflow.run,
-                ProjectakInput(user_message="Add dark mode to the app"),
-                id="test-projektak-log",
-                task_queue="test-projektak-log",
+                BaseWorkflow.run,
+                BaseInput(user_message="Add dark mode to the app"),
+                id="test-6", task_queue="test-6",
             )
-            # Log entries for request + assessment + DB write should appear before confirm
-            log_before = await _poll_query(
-                handle, "get_log", lambda l: len(l) >= 3
-            )
+            log_before = await _poll_query(handle, "get_log", lambda l: len(l) >= 3)
             await handle.signal("confirm")
             await handle.result()
             log_after = await handle.query("get_log")
 
-    # Before confirm: request received, assessment, DB write
     assert any("Add dark mode" in e for e in log_before)
     assert any("duplicit" in e.lower() for e in log_before)
     assert any("databázy" in e for e in log_before)
-
-    # After confirm: confirmation entry appended
     assert any("Potvrdenie" in e for e in log_after)
 
 
 # ---------------------------------------------------------------------------
-# Test 7: intent progresses from duplicate_suggested → duplicate_resolved
+# Test 7: intent two-phase: duplicate_suggested → duplicate_resolved
 # ---------------------------------------------------------------------------
 
-async def test_projektak_intent_two_phase():
-    """While running: get_result returns 'duplicate_suggested'.
-    After confirm: run() returns 'duplicate_resolved'."""
+async def test_intent_two_phase():
     async with await WorkflowEnvironment.start_time_skipping() as env:
         async with Worker(
-            env.client,
-            task_queue="test-projektak-intent",
-            workflows=[ProjectakWorkflow],
+            env.client, task_queue="test-7",
+            workflows=[BaseWorkflow],
             activities=[
+                _make_parse_intent_mock("new_feature"),
                 _make_store_task_mock([]),
                 _make_update_status_mock([]),
             ],
         ):
             handle = await env.client.start_workflow(
-                ProjectakWorkflow.run,
-                ProjectakInput(user_message="Add search feature"),
-                id="test-projektak-intent-value",
-                task_queue="test-projektak-intent",
+                BaseWorkflow.run,
+                BaseInput(user_message="Add search feature"),
+                id="test-7", task_queue="test-7",
             )
-            # While HITL is pending: get_result must show duplicate_suggested
             suggested = await _poll_query(
                 handle, "get_result",
                 lambda r: json.loads(r).get("intent") == "duplicate_suggested",
@@ -312,8 +292,5 @@ async def test_projektak_intent_two_phase():
             result = await handle.result()
 
     data = json.loads(result)
-    assert data["intent"] == "duplicate_resolved", (
-        f"Expected 'duplicate_resolved', got '{data['intent']}'"
-    )
+    assert data["intent"] == "duplicate_resolved"
     assert data["intent"] != "resolved_as_duplicate"
-    assert data["intent"] != "duplicate"

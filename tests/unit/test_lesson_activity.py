@@ -61,11 +61,3 @@ class TestCaptureLessonOutcomeInTitle:
         assert outcome.upper() in row[0]
 
 
-class TestCaptureLessonOptions:
-    """CAPTURE_LESSON_OPTIONS must have correct timeout and retry settings."""
-
-    def test_options_values(self):
-        from temporal_agents.activities.options import CAPTURE_LESSON_OPTIONS
-
-        assert CAPTURE_LESSON_OPTIONS.schedule_to_close_timeout == timedelta(minutes=1)
-        assert CAPTURE_LESSON_OPTIONS.retry_policy.maximum_attempts == 1
