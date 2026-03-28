@@ -24,12 +24,12 @@ async def main() -> None:
     client = await Client.connect("localhost:7233")
     worker = Worker(
         client,
-        task_queue="temporal-agents",
+        task_queue="temporal-agentic-workflow",
         workflows=WORKFLOWS,
         activities=ACTIVITIES,
         max_concurrent_activities=5,
     )
-    print("Worker started, task_queue=temporal-agents, max_concurrent_activities=5")
+    print("Worker started, task_queue=temporal-agentic-workflow, max_concurrent_activities=5")
     await worker.run()
 
 

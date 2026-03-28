@@ -5,7 +5,7 @@ import click
 
 @click.group()
 def cli():
-    """temporal-agents CLI."""
+    """temporal-agentic-workflow CLI."""
     pass
 
 

@@ -14,7 +14,7 @@ from temporal_agents.activities.hitl_db import _fetch_tasks
 from temporal_agents.workflows.intent_parser import IntentParser
 from temporal_agents.workflows.command_dispatcher import CommandInput, CommandDispatcher
 
-TASK_QUEUE = "temporal-agents"
+TASK_QUEUE = "temporal-agentic-workflow"
 
 app = FastAPI()
 temporal_client: Optional[Client] = None
