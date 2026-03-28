@@ -1,4 +1,4 @@
-"""ClaudeChatWorkflow — simple chat via claude -p subprocess.
+"""IntentParser — accepts user messages via signals and resolves them to structured intent via claude -p.
 
 Signals:  user_prompt(str), end_chat()
 Queries:  get_conversation_history()
@@ -15,7 +15,9 @@ with workflow.unsafe.imports_passed_through():
 
 
 @workflow.defn
-class ClaudeChatWorkflow:
+class IntentParser:
+    """Accepts user messages via signals and resolves them to structured intent via claude -p."""
+
     def __init__(self) -> None:
         self._messages: List[Dict[str, Any]] = []
         self._queue: Deque[str] = deque()

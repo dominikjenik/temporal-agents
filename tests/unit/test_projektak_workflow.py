@@ -1,4 +1,4 @@
-"""Tests for BaseWorkflow — intent routing and inline HITL.
+"""Tests for CommandDispatcher — intent routing and inline HITL.
 
 Test 1: new_feature intent → HITL → confirm → returns {intent: "duplicate_resolved"} JSON.
 Test 2: new_feature → stores type='hitl' task, updates status to 'confirmed' after confirm signal.
@@ -19,7 +19,7 @@ from temporalio.worker import Worker
 import asyncio
 
 from temporal_agents.activities.hitl_db import Task
-from temporal_agents.workflows.base_workflow import BaseInput, BaseWorkflow
+from temporal_agents.workflows.command_dispatcher import CommandInput, CommandDispatcher
 
 
 async def _poll_query(handle, query_name: str, condition, timeout: float = 5.0):
@@ -90,7 +90,7 @@ async def test_new_feature_confirm_returns_duplicate_resolved():
     async with await WorkflowEnvironment.start_time_skipping() as env:
         async with Worker(
             env.client, task_queue="test-1",
-            workflows=[BaseWorkflow],
+            workflows=[CommandDispatcher],
             activities=[
                 _make_parse_intent_mock("new_feature"),
                 _make_store_task_mock([]),
@@ -98,8 +98,8 @@ async def test_new_feature_confirm_returns_duplicate_resolved():
             ],
         ):
             handle = await env.client.start_workflow(
-                BaseWorkflow.run,
-                BaseInput(user_message="Add dark mode"),
+                CommandDispatcher.run,
+                CommandInput(user_message="Add dark mode"),
                 id="test-1", task_queue="test-1",
             )
             await handle.signal("confirm")
@@ -119,7 +119,7 @@ async def test_new_feature_stores_hitl_and_updates_status():
     async with await WorkflowEnvironment.start_time_skipping() as env:
         async with Worker(
             env.client, task_queue="test-2",
-            workflows=[BaseWorkflow],
+            workflows=[CommandDispatcher],
             activities=[
                 _make_parse_intent_mock("new_feature"),
                 _make_store_task_mock(store_calls),
@@ -127,8 +127,8 @@ async def test_new_feature_stores_hitl_and_updates_status():
             ],
         ):
             handle = await env.client.start_workflow(
-                BaseWorkflow.run,
-                BaseInput(user_message="Add dark mode"),
+                CommandDispatcher.run,
+                CommandInput(user_message="Add dark mode"),
                 id="test-2", task_queue="test-2",
             )
             await handle.signal("confirm")
@@ -149,7 +149,7 @@ async def test_new_feature_handles_comment_then_confirm():
     async with await WorkflowEnvironment.start_time_skipping() as env:
         async with Worker(
             env.client, task_queue="test-3",
-            workflows=[BaseWorkflow],
+            workflows=[CommandDispatcher],
             activities=[
                 _make_parse_intent_mock("new_feature"),
                 _make_store_task_mock([]),
@@ -157,8 +157,8 @@ async def test_new_feature_handles_comment_then_confirm():
             ],
         ):
             handle = await env.client.start_workflow(
-                BaseWorkflow.run,
-                BaseInput(user_message="Add dark mode"),
+                CommandDispatcher.run,
+                CommandInput(user_message="Add dark mode"),
                 id="test-3", task_queue="test-3",
             )
             await handle.signal("comment", "Toto nie je duplikát.")
@@ -186,15 +186,15 @@ async def test_project_status_returns_task_list():
     async with await WorkflowEnvironment.start_time_skipping() as env:
         async with Worker(
             env.client, task_queue="test-4",
-            workflows=[BaseWorkflow],
+            workflows=[CommandDispatcher],
             activities=[
                 _make_parse_intent_mock("project_status"),
                 _make_list_tasks_mock(tasks),
             ],
         ):
             result = await env.client.execute_workflow(
-                BaseWorkflow.run,
-                BaseInput(user_message="co na praci"),
+                CommandDispatcher.run,
+                CommandInput(user_message="co na praci"),
                 id="test-4", task_queue="test-4",
             )
 
@@ -211,7 +211,7 @@ async def test_new_feature_full_pipeline():
     async with await WorkflowEnvironment.start_time_skipping() as env:
         async with Worker(
             env.client, task_queue="test-5",
-            workflows=[BaseWorkflow],
+            workflows=[CommandDispatcher],
             activities=[
                 _make_parse_intent_mock("new_feature"),
                 _make_store_task_mock(store_calls),
@@ -219,8 +219,8 @@ async def test_new_feature_full_pipeline():
             ],
         ):
             handle = await env.client.start_workflow(
-                BaseWorkflow.run,
-                BaseInput(user_message="nova feature temporal projektu - pridaj UI button"),
+                CommandDispatcher.run,
+                CommandInput(user_message="nova feature temporal projektu - pridaj UI button"),
                 id="test-5", task_queue="test-5",
             )
             status = await _poll_query(handle, "get_status", lambda s: s == "waiting_hitl")
@@ -239,7 +239,7 @@ async def test_log_contains_key_steps():
     async with await WorkflowEnvironment.start_time_skipping() as env:
         async with Worker(
             env.client, task_queue="test-6",
-            workflows=[BaseWorkflow],
+            workflows=[CommandDispatcher],
             activities=[
                 _make_parse_intent_mock("new_feature"),
                 _make_store_task_mock([]),
@@ -247,8 +247,8 @@ async def test_log_contains_key_steps():
             ],
         ):
             handle = await env.client.start_workflow(
-                BaseWorkflow.run,
-                BaseInput(user_message="Add dark mode to the app"),
+                CommandDispatcher.run,
+                CommandInput(user_message="Add dark mode to the app"),
                 id="test-6", task_queue="test-6",
             )
             log_before = await _poll_query(handle, "get_log", lambda l: len(l) >= 3)
@@ -270,7 +270,7 @@ async def test_intent_two_phase():
     async with await WorkflowEnvironment.start_time_skipping() as env:
         async with Worker(
             env.client, task_queue="test-7",
-            workflows=[BaseWorkflow],
+            workflows=[CommandDispatcher],
             activities=[
                 _make_parse_intent_mock("new_feature"),
                 _make_store_task_mock([]),
@@ -278,8 +278,8 @@ async def test_intent_two_phase():
             ],
         ):
             handle = await env.client.start_workflow(
-                BaseWorkflow.run,
-                BaseInput(user_message="Add search feature"),
+                CommandDispatcher.run,
+                CommandInput(user_message="Add search feature"),
                 id="test-7", task_queue="test-7",
             )
             suggested = await _poll_query(

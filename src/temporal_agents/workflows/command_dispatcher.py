@@ -1,4 +1,4 @@
-"""BaseWorkflow — intent router + inline HITL for new_feature.
+"""CommandDispatcher — routes parsed intent to the correct operation and manages its lifecycle (start, signal, query, status).
 
 Flow:
   1. parse_intent_activity(user_message) -> {intent: ...}
@@ -31,12 +31,14 @@ RETRY_ONCE = RetryPolicy(maximum_attempts=1)
 
 
 @dataclass
-class BaseInput:
+class CommandInput:
     user_message: str
 
 
 @workflow.defn
-class BaseWorkflow:
+class CommandDispatcher:
+    """Routes parsed intent to the correct operation and manages its lifecycle (start, signal, query, status)."""
+
     def __init__(self) -> None:
         self._status: str = "pending"
         self._intent: str = ""
@@ -46,7 +48,7 @@ class BaseWorkflow:
         self._log: list[str] = []
 
     @workflow.run
-    async def run(self, input: BaseInput) -> str:
+    async def run(self, input: CommandInput) -> str:
         self._status = "parsing_intent"
         raw = await workflow.execute_activity(
             parse_intent_activity,

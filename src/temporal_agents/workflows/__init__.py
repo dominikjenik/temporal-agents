@@ -1,8 +1,8 @@
-from .base_workflow import BaseInput, BaseWorkflow
-from .claude_chat_workflow import ClaudeChatWorkflow
+from .command_dispatcher import CommandInput, CommandDispatcher
+from .intent_parser import IntentParser
 
 __all__ = [
-    "BaseInput",
-    "BaseWorkflow",
-    "ClaudeChatWorkflow",
+    "CommandInput",
+    "CommandDispatcher",
+    "IntentParser",
 ]

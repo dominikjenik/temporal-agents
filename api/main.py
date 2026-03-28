@@ -11,8 +11,8 @@ from temporalio.client import Client
 from temporalio.exceptions import TemporalError
 
 from temporal_agents.activities.hitl_db import _fetch_tasks
-from temporal_agents.workflows.claude_chat_workflow import ClaudeChatWorkflow
-from temporal_agents.workflows.base_workflow import BaseInput, BaseWorkflow
+from temporal_agents.workflows.intent_parser import IntentParser
+from temporal_agents.workflows.command_dispatcher import CommandInput, CommandDispatcher
 
 TASK_QUEUE = "temporal-agents"
 
@@ -48,7 +48,7 @@ def root():
 
 
 # ---------------------------------------------------------------------------
-# Chat (ClaudeChatWorkflow)
+# Chat (IntentParser)
 # ---------------------------------------------------------------------------
 
 CHAT_WORKFLOW_ID = "chat-workflow"
@@ -57,7 +57,7 @@ CHAT_WORKFLOW_ID = "chat-workflow"
 @app.post("/chat/start")
 async def chat_start():
     await temporal_client.start_workflow(
-        ClaudeChatWorkflow.run,
+        IntentParser.run,
         id=CHAT_WORKFLOW_ID,
         task_queue=TASK_QUEUE,
         id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
@@ -68,7 +68,7 @@ async def chat_start():
 @app.post("/chat/prompt")
 async def chat_prompt(prompt: str):
     await temporal_client.start_workflow(
-        ClaudeChatWorkflow.run,
+        IntentParser.run,
         id=CHAT_WORKFLOW_ID,
         task_queue=TASK_QUEUE,
         id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
@@ -114,7 +114,7 @@ async def chat_history():
 
 
 # ---------------------------------------------------------------------------
-# Manager (BaseWorkflow)
+# Manager (CommandDispatcher)
 # ---------------------------------------------------------------------------
 
 class ManagerRequest(BaseModel):
@@ -128,8 +128,8 @@ async def manager_start(body: ManagerRequest):
     workflow_id = f"manager-{ts}-{slug}"
     try:
         await temporal_client.start_workflow(
-            BaseWorkflow.run,
-            BaseInput(user_message=body.user_message),
+            CommandDispatcher.run,
+            CommandInput(user_message=body.user_message),
             id=workflow_id,
             task_queue=TASK_QUEUE,
         )

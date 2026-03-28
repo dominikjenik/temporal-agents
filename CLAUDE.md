@@ -21,7 +21,7 @@
 
 **Workflow hierarchia:**
 ```
-BaseWorkflow
+CommandDispatcher
   ↓
 ProjectWorkflow (zbornik: sekvencia / ginidocs: paralelne)
   ↓
@@ -49,7 +49,7 @@ claude_agent_activity (Claude cez LiteLLM)
 
 ```
 ~/temporal-ai-agent/
-├── workflows/          # BaseWorkflow, ProjectWorkflow, FeatureWorkflow, agent_goal
+├── workflows/          # CommandDispatcher, ProjectWorkflow, FeatureWorkflow, agent_goal
 ├── activities/         # claude_agent_activity.py + tool activities
 ├── goals/              # Definície projektov (zbornik.py, ginidocs.py)
 ├── api/                # FastAPI server

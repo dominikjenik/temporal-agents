@@ -1,4 +1,4 @@
-"""Tests for BaseWorkflow — intent routing and inline HITL.
+"""Tests for CommandDispatcher — intent routing and inline HITL.
 
 Test 1: project_status intent → list_tasks → formatted output.
 Test 2: unknown intent → capture_lesson called.
@@ -14,7 +14,7 @@ from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
 from temporal_agents.activities.hitl_db import Task
-from temporal_agents.workflows.base_workflow import BaseInput, BaseWorkflow, _format_tasks
+from temporal_agents.workflows.command_dispatcher import CommandInput, CommandDispatcher, _format_tasks
 
 _NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -45,12 +45,12 @@ async def test_project_status_queries_db_and_formats():
 
         async with Worker(
             env.client, task_queue="test-base-1",
-            workflows=[BaseWorkflow],
+            workflows=[CommandDispatcher],
             activities=[mock_parse_intent, mock_list_tasks],
         ):
             result = await env.client.execute_workflow(
-                BaseWorkflow.run,
-                BaseInput(user_message="co na praci"),
+                CommandDispatcher.run,
+                CommandInput(user_message="co na praci"),
                 id="test-base-project-status", task_queue="test-base-1",
             )
 
@@ -81,12 +81,12 @@ async def test_unknown_intent_triggers_capture_lesson():
 
         async with Worker(
             env.client, task_queue="test-base-2",
-            workflows=[BaseWorkflow],
+            workflows=[CommandDispatcher],
             activities=[mock_parse_intent, mock_capture_lesson],
         ):
             result = await env.client.execute_workflow(
-                BaseWorkflow.run,
-                BaseInput(user_message="xyzzy gibberish"),
+                CommandDispatcher.run,
+                CommandInput(user_message="xyzzy gibberish"),
                 id="test-base-unknown-intent", task_queue="test-base-2",
             )
 

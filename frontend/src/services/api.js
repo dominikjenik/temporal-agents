@@ -48,7 +48,7 @@ async function fetchWithTimeout(url, options = {}, timeout = REQUEST_TIMEOUT_MS)
 }
 
 export const apiService = {
-    // Chat (ClaudeChatWorkflow)
+    // Chat (IntentParser)
 
     async getConversationHistory() {
         try {
@@ -102,7 +102,7 @@ export const apiService = {
         }
     },
 
-    // Manager (BaseWorkflow)
+    // Manager (CommandDispatcher)
 
     async startManager(userMessage) {
         try {
