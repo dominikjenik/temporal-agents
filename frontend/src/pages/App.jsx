@@ -347,7 +347,13 @@ export default function App() {
         addMessage(trimmed, 'user');
         setLoading(true);
         try {
-            const { workflow_id } = await apiService.startManager(trimmed);
+            const parsed = await apiService.parseIntent(trimmed);
+            if (parsed.clarification) {
+                addMessage(parsed.clarification, 'agent');
+                setLoading(false);
+                return;
+            }
+            const { workflow_id } = await apiService.startManager(parsed.intent, parsed.project, trimmed);
             startPolling(workflow_id);
         } catch (err) {
             addMessage(`Chyba: ${err.message}`, 'error');

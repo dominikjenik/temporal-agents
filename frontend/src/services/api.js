@@ -102,16 +102,35 @@ export const apiService = {
         }
     },
 
-    // Manager (CommandDispatcher)
+    // IntentParser
 
-    async startManager(userMessage) {
+    async parseIntent(message) {
+        try {
+            const res = await fetchWithTimeout(
+                `${API_BASE_URL}/intent/parse`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message })
+                }
+            );
+            return handleResponse(res);
+        } catch (error) {
+            if (error instanceof ApiError) throw error;
+            throw new ApiError('Failed to parse intent', error.status || 500);
+        }
+    },
+
+    // CommandDispatcher → FeatureWorkflow
+
+    async startManager(intent, project, userMessage) {
         try {
             const res = await fetchWithTimeout(
                 `${API_BASE_URL}/manager/start`,
                 {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ user_message: userMessage })
+                    body: JSON.stringify({ intent, project, user_message: userMessage })
                 }
             );
             return handleResponse(res);
