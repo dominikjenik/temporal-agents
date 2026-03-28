@@ -101,9 +101,9 @@ function TaskDetail({ task, onClose }) {
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+        <div className="fixed inset-0 z-50 flex items-start pt-20 justify-center bg-black/40" onClick={onClose}>
             <div
-                className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-lg mx-4 p-4 flex flex-col gap-3 max-h-[80vh] overflow-y-auto"
+                className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-lg mx-4 p-4 flex flex-col gap-3 max-h-[calc(100vh-6rem)] overflow-y-auto"
                 onClick={e => e.stopPropagation()}
             >
                 <div className="flex justify-between items-center">
@@ -118,7 +118,9 @@ function TaskDetail({ task, onClose }) {
                     </button>
                 </div>
 
-                {result ? (
+                {!task.workflow_id ? (
+                    <p className="text-xs text-gray-400 italic">Posúdenie nedostupné.</p>
+                ) : result ? (
                     <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded p-3 text-sm">
                         <span className="font-semibold text-yellow-700 dark:text-yellow-300 uppercase text-xs tracking-wide">
                             {result.intent}

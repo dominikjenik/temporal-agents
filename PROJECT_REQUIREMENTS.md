@@ -37,3 +37,7 @@ nova poziadavka: format check a learning loop. (1) Ak manager alebo projektak ne
 | TestCaptureLessonOutcomeInTitle::test_outcome_in_title[failure]
 nova poziadavka: end-to-end pipeline — vstup "nova feature temporal projektu - pridaj UI button ok" musí prejsť celým reťazcom: Manager resolvne intent new_feature, spustí ProjectakWorkflow ako child (ABANDON), Projektak zapíše HITL task do DB a čaká na confirm signál (stav waiting_hitl). Timeout pri skutočnom LLM volaní bol dôvodom zlyhania — pokryté unit testom s mocknutým parse_intent.
 | test_new_feature_message_full_pipeline
+nova poziadavka: UI — dve opravy. (1) TaskDetail zobrazoval "Načítavam posúdenie..." donekonečna pre úlohy bez workflow_id — opravené kontrolou !task.workflow_id → zobrazí "Posúdenie nedostupné.". (2) Nadpis v TaskDetail bol zakrytý pevnou NavBar — opravené: backdrop zmenil items-center na items-start pt-20, modal dostane max-h-[calc(100vh-6rem)].
+| App > TaskDetail — task without workflow_id > shows "Posúdenie nedostupné." and not "Načítavam posúdenie..."
+| App > TaskDetail — task with workflow_id > shows "Načítavam posúdenie..." while result is null
+| App > TaskDetail — modal title visibility > backdrop has items-start and pt-20 so title is not hidden behind NavBar
