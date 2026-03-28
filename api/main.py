@@ -162,10 +162,25 @@ class CommentRequest(BaseModel):
 async def hitl_state(workflow_id: str):
     try:
         handle = temporal_client.get_workflow_handle(workflow_id)
+        desc = await handle.describe()
+
+        if desc.status == WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_COMPLETED:
+            final_result = await handle.result()
+            return {
+                "result": final_result,
+                "comments": [],
+                "status": "confirmed",
+                "log": ["Workflow ukončený — požiadavka potvrdená"],
+            }
+
         result = await handle.query("get_result")
         comments = await handle.query("get_comments")
         status = await handle.query("get_status")
-        return {"result": result, "comments": comments, "status": status}
+        try:
+            log = await handle.query("get_log")
+        except TemporalError:
+            log = []
+        return {"result": result, "comments": comments, "status": status, "log": log}
     except TemporalError as e:
         raise HTTPException(status_code=404, detail=str(e))
 

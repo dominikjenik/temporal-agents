@@ -35,16 +35,20 @@ class ProjectakWorkflow:
         self._confirmed = False
         self._pending_comment: Optional[str] = None
         self._comments: list = []
+        self._log: list[str] = []
 
     @workflow.run
     async def run(self, input: ProjectakInput) -> str:
         wf_id = workflow.info().workflow_id
+        self._log.append(f"Požiadavka prijatá: {input.user_message[:120]}")
+        self._log.append("Posúdenie: pravdepodobná duplicita s existujúcimi úlohami")
         await workflow.execute_activity(
             store_task,
             args=["manager", f"[DUPLICATE] {input.user_message}", 1, "hitl", wf_id],
             start_to_close_timeout=timedelta(seconds=10),
             retry_policy=RetryPolicy(maximum_attempts=1),
         )
+        self._log.append("HITL úloha zapísaná do databázy — čakám na potvrdenie")
         while not self._confirmed:
             await workflow.wait_condition(
                 lambda: self._confirmed or self._pending_comment is not None
@@ -52,10 +56,13 @@ class ProjectakWorkflow:
             if self._pending_comment is not None:
                 comment = self._pending_comment
                 self._pending_comment = None
+                self._log.append(f"Komentár prijatý: {comment[:80]}")
                 self._comments.append({
                     "user": comment,
                     "bot": "Komentár zaznamenaný. Požiadavku prehodnotím a dám vám vedieť.",
                 })
+                self._log.append("Komentár spracovaný")
+        self._log.append("Potvrdenie prijaté — workflow sa ukončuje")
         await workflow.execute_activity(
             update_task_status,
             args=[wf_id, "confirmed"],
@@ -83,3 +90,7 @@ class ProjectakWorkflow:
     @workflow.query
     def get_comments(self) -> list:
         return self._comments
+
+    @workflow.query
+    def get_log(self) -> list[str]:
+        return self._log

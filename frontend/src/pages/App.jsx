@@ -71,6 +71,7 @@ function TaskDetail({ task, onClose }) {
 
     const result = hitlState?.result ? JSON.parse(hitlState.result) : null;
     const comments = hitlState?.comments ?? [];
+    const log = hitlState?.log ?? [];
 
     const handleComment = async () => {
         const trimmed = comment.trim();
@@ -120,15 +121,29 @@ function TaskDetail({ task, onClose }) {
 
                 {!task.workflow_id ? (
                     <p className="text-xs text-gray-400 italic">Posúdenie nedostupné.</p>
-                ) : result ? (
-                    <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded p-3 text-sm">
-                        <span className="font-semibold text-yellow-700 dark:text-yellow-300 uppercase text-xs tracking-wide">
-                            {result.intent}
-                        </span>
-                        <p className="mt-1 text-yellow-800 dark:text-yellow-200">{result.payload}</p>
-                    </div>
                 ) : (
-                    <p className="text-xs text-gray-400 italic">Načítavam posúdenie...</p>
+                    <>
+                        {result && (
+                            <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded p-3 text-sm">
+                                <span className="font-semibold text-yellow-700 dark:text-yellow-300 uppercase text-xs tracking-wide">
+                                    {result.intent}
+                                </span>
+                                <p className="mt-1 text-yellow-800 dark:text-yellow-200">{result.payload}</p>
+                            </div>
+                        )}
+                        {log.length > 0 ? (
+                            <div className="bg-gray-50 dark:bg-gray-900 rounded p-2 text-xs font-mono text-gray-500 dark:text-gray-400 flex flex-col gap-0.5 max-h-32 overflow-y-auto">
+                                {log.map((entry, i) => (
+                                    <div key={i} className="flex gap-1.5">
+                                        <span className="text-gray-300 dark:text-gray-600 shrink-0">›</span>
+                                        <span>{entry}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <p className="text-xs text-gray-400 italic">Načítavam posúdenie...</p>
+                        )}
+                    </>
                 )}
 
                 {comments.length > 0 && (

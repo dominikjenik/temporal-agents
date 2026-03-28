@@ -5,6 +5,7 @@ Test 2: ProjectakWorkflow stores HITL task and updates status to 'confirmed'.
 Test 3: ProjectakWorkflow handles comment signal then resolves on confirm.
 Test 4: ManagerWorkflow routes new_feature intent → starts ProjectakWorkflow child.
 Test 5: End-to-end — real user message → Manager → Projektak HITL waiting state.
+Test 6: ProjectakWorkflow log contains key execution steps exposed via get_log query.
 """
 import json
 import uuid
@@ -235,3 +236,42 @@ async def test_new_feature_message_full_pipeline():
     assert len(store_calls) == 1
     assert store_calls[0]["type"] == "hitl"
     assert "nova feature temporal projektu" in store_calls[0]["title"]
+
+
+# ---------------------------------------------------------------------------
+# Test 6: get_log query exposes workflow execution steps
+# ---------------------------------------------------------------------------
+
+async def test_projektak_log_contains_key_steps():
+    """get_log returns entries for: received request, assessment, DB write, waiting, confirmation."""
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        async with Worker(
+            env.client,
+            task_queue="test-projektak-log",
+            workflows=[ProjectakWorkflow],
+            activities=[
+                _make_store_task_mock([]),
+                _make_update_status_mock([]),
+            ],
+        ):
+            handle = await env.client.start_workflow(
+                ProjectakWorkflow.run,
+                ProjectakInput(user_message="Add dark mode to the app"),
+                id="test-projektak-log",
+                task_queue="test-projektak-log",
+            )
+            # Log entries for request + assessment + DB write should appear before confirm
+            log_before = await _poll_query(
+                handle, "get_log", lambda l: len(l) >= 3
+            )
+            await handle.signal("confirm")
+            await handle.result()
+            log_after = await handle.query("get_log")
+
+    # Before confirm: request received, assessment, DB write
+    assert any("Add dark mode" in e for e in log_before)
+    assert any("duplicit" in e.lower() for e in log_before)
+    assert any("databázy" in e for e in log_before)
+
+    # After confirm: confirmation entry appended
+    assert any("Potvrdenie" in e for e in log_after)

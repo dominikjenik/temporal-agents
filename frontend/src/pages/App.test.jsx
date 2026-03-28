@@ -6,7 +6,7 @@ import App from './App';
 vi.mock('../services/api', () => ({
     apiService: {
         getTasks: vi.fn().mockResolvedValue([]),
-        getHitlState: vi.fn().mockResolvedValue({ result: null, comments: [], status: 'pending' }),
+        getHitlState: vi.fn().mockResolvedValue({ result: null, comments: [], status: 'pending', log: [] }),
         startManager: vi.fn(),
         managerStatus: vi.fn(),
         managerResult: vi.fn(),
@@ -55,7 +55,7 @@ describe('TaskDetail — task with workflow_id', () => {
             status: 'hitl', type: 'hitl', workflow_id: 'wf-abc',
         };
         api.getTasks.mockResolvedValue([task]);
-        api.getHitlState.mockResolvedValue({ result: null, comments: [], status: 'pending' });
+        api.getHitlState.mockResolvedValue({ result: null, comments: [], status: 'pending', log: [] });
 
         render(<App />);
 

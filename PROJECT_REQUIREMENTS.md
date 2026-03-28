@@ -41,3 +41,5 @@ nova poziadavka: UI — dve opravy. (1) TaskDetail zobrazoval "Načítavam posú
 | App > TaskDetail — task without workflow_id > shows "Posúdenie nedostupné." and not "Načítavam posúdenie..."
 | App > TaskDetail — task with workflow_id > shows "Načítavam posúdenie..." while result is null
 | App > TaskDetail — modal title visibility > backdrop has items-start and pt-20 so title is not hidden behind NavBar
+nova poziadavka: UI — "Načítavam posúdenie..." nesmie byť prázdne — má zobrazovať log z celého workflow. ProjectakWorkflow akumuluje log záznamy počas behu (prijatá požiadavka, posúdenie, zápis do DB, čakanie, potvrdenie, komentáre) a exponuje ich cez get_log query. API /hitl/{workflow_id}/state vracia log pole. UI zobrazuje log ako kompaktný terminálový výpis; "Načítavam posúdenie..." sa zobrazí iba ak log je ešte prázdny. Po príchode result bannera je log stále viditeľný ako kontext.
+| test_projektak_log_contains_key_steps
