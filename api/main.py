@@ -118,6 +118,8 @@ async def chat_history():
 # ---------------------------------------------------------------------------
 
 class ManagerRequest(BaseModel):
+    intent: str
+    project: str
     user_message: str
 
 
@@ -129,7 +131,7 @@ async def manager_start(body: ManagerRequest):
     try:
         await temporal_client.start_workflow(
             CommandDispatcher.run,
-            CommandInput(user_message=body.user_message),
+            CommandInput(intent=body.intent, project=body.project, user_message=body.user_message),
             id=workflow_id,
             task_queue=TASK_QUEUE,
         )

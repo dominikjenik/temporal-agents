@@ -1,11 +1,11 @@
 """CommandDispatcher — routes parsed intent to the correct operation and manages its lifecycle (start, signal, query, status).
 
 Flow:
-  1. parse_intent_activity(user_message) -> {intent: ...}
-  2. Route:
-     - project_status -> list_tasks() -> return formatted list
-     - new_feature    -> store HITL task, wait for confirm/comment signals, return result
-     - unknown        -> capture_lesson, return error
+  1. Receives pre-parsed {intent, project, user_message} from IntentParser
+  2. Switch on intent:
+     - new_feature  -> projektaka HITL mock (duplicate check, confirm/comment signals)
+     - new_project  -> (not yet implemented)
+     - unknown      -> capture_lesson, return error
 """
 import json
 from dataclasses import dataclass
@@ -16,8 +16,7 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
-    from temporal_agents.activities.agents import parse_intent_activity
-    from temporal_agents.activities.hitl_db import Task, list_tasks, store_task, update_task_status
+    from temporal_agents.activities.hitl_db import store_task, update_task_status
     from temporal_agents.activities.lesson import capture_lesson
 
 _DUPLICATE_PAYLOAD = (
@@ -25,13 +24,14 @@ _DUPLICATE_PAYLOAD = (
     "Prosím potvrďte alebo okomentujte."
 )
 
-INTENT_TIMEOUT = timedelta(seconds=60)
 DB_TIMEOUT = timedelta(seconds=10)
 RETRY_ONCE = RetryPolicy(maximum_attempts=1)
 
 
 @dataclass
 class CommandInput:
+    intent: str
+    project: str
     user_message: str
 
 
@@ -49,54 +49,42 @@ class CommandDispatcher:
 
     @workflow.run
     async def run(self, input: CommandInput) -> str:
-        self._status = "parsing_intent"
-        raw = await workflow.execute_activity(
-            parse_intent_activity,
-            input.user_message,
-            start_to_close_timeout=INTENT_TIMEOUT,
-            retry_policy=RETRY_ONCE,
-        )
-        self._intent = json.loads(raw).get("intent", "unknown")
-        workflow.logger.info(f"[Manager] intent={self._intent}")
+        self._intent = input.intent
+        workflow.logger.info(f"[Dispatcher] intent={input.intent} project={input.project}")
 
-        if self._intent == "project_status":
-            self._status = "querying_tasks"
-            tasks: list[Task] = await workflow.execute_activity(
-                list_tasks,
-                "pending",
-                start_to_close_timeout=DB_TIMEOUT,
-                retry_policy=RETRY_ONCE,
-            )
+        if input.intent == "new_feature":
+            return await self._handle_new_feature(input.project, input.user_message)
+
+        if input.intent == "new_project":
+            # TODO: start new project setup workflow
             self._status = "done"
-            return _format_tasks(tasks)
-
-        if self._intent == "new_feature":
-            return await self._handle_new_feature(input.user_message)
+            return json.dumps({"intent": "new_project", "project": input.project, "status": "not_implemented"})
 
         self._status = "done"
         await workflow.execute_activity(
             capture_lesson,
             args=[
                 workflow.info().workflow_id,
-                "manager",
+                "dispatcher",
                 "failure",
-                f"parse_intent returned 'unknown' for: '{input.user_message[:100]}'.",
+                f"Unknown intent '{input.intent}' for project '{input.project}': '{input.user_message[:100]}'.",
             ],
-            start_to_close_timeout=timedelta(seconds=10),
+            start_to_close_timeout=DB_TIMEOUT,
             retry_policy=RETRY_ONCE,
         )
-        return f"Unknown intent: '{self._intent}'. Supported: project_status, new_feature."
+        return f"Unknown intent: '{input.intent}'. Supported: new_feature, new_project."
 
-    async def _handle_new_feature(self, user_message: str) -> str:
+    async def _handle_new_feature(self, project: str, user_message: str) -> str:
+        """Projektaka HITL mock — checks for duplicates, waits for user confirm/comment."""
         wf_id = workflow.info().workflow_id
         self._status = "waiting_hitl"
-        self._log.append(f"Požiadavka prijatá: {user_message[:120]}")
+        self._log.append(f"Požiadavka prijatá [{project}]: {user_message[:120]}")
         self._log.append("Posúdenie: pravdepodobná duplicita s existujúcimi úlohami")
 
         await workflow.execute_activity(
             store_task,
-            args=["manager", f"[DUPLICATE] {user_message}", 1, "hitl", wf_id],
-            start_to_close_timeout=timedelta(seconds=10),
+            args=[project, f"[DUPLICATE] {user_message}", 1, "hitl", wf_id],
+            start_to_close_timeout=DB_TIMEOUT,
             retry_policy=RETRY_ONCE,
         )
         self._log.append("HITL úloha zapísaná do databázy — čakám na potvrdenie")
@@ -119,7 +107,7 @@ class CommandDispatcher:
         await workflow.execute_activity(
             update_task_status,
             args=[wf_id, "confirmed"],
-            start_to_close_timeout=timedelta(seconds=10),
+            start_to_close_timeout=DB_TIMEOUT,
             retry_policy=RETRY_ONCE,
         )
         self._status = "done"
@@ -158,16 +146,3 @@ class CommandDispatcher:
     @workflow.query
     def get_log(self) -> list[str]:
         return self._log
-
-
-def _format_tasks(tasks: list[Task]) -> str:
-    if not tasks:
-        return "Žiadne úlohy."
-    lines = []
-    current_project = None
-    for t in tasks:
-        if t.project != current_project:
-            current_project = t.project
-            lines.append(f"\n{t.project}:")
-        lines.append(f"  [{t.priority}] {t.title}  ({t.status})")
-    return "\n".join(lines).strip()
