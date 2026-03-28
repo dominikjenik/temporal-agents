@@ -7,6 +7,7 @@ vi.mock('../services/api', () => ({
     apiService: {
         getTasks: vi.fn().mockResolvedValue([]),
         getHitlState: vi.fn().mockResolvedValue({ result: null, comments: [], status: 'pending', log: [] }),
+        getHitlHistory: vi.fn().mockResolvedValue({ events: [] }),
         startManager: vi.fn(),
         managerStatus: vi.fn(),
         managerResult: vi.fn(),
@@ -48,22 +49,42 @@ describe('TaskDetail — task without workflow_id', () => {
 });
 
 describe('TaskDetail — task with workflow_id', () => {
-    it('shows "Načítavam posúdenie..." while result is null', async () => {
+    it('shows log entries, toggle button, and not "Posúdenie nedostupné."', async () => {
         const api = await getApi();
         const task = {
             id: 2, project: 'TEST', title: 'HITL task', priority: 1,
             status: 'hitl', type: 'hitl', workflow_id: 'wf-abc',
         };
         api.getTasks.mockResolvedValue([task]);
-        api.getHitlState.mockResolvedValue({ result: null, comments: [], status: 'pending', log: [] });
+        api.getHitlState.mockResolvedValue({
+            result: null, comments: [], status: 'pending',
+            log: ['Požiadavka prijatá: test', 'HITL úloha zapísaná do databázy'],
+        });
+        api.getHitlHistory.mockResolvedValue({
+            events: [
+                { id: 1, kind: 'workflow_started', workflow: 'ProjectakWorkflow', input: { user_message: 'test' } },
+                { id: 5, kind: 'activity_scheduled', activity: 'store_task', input: ['manager', '[DUPLICATE] test', 1] },
+                { id: 7, kind: 'activity_completed', activity: 'store_task', output: { id: 'abc', status: 'pending' } },
+            ],
+        });
 
         render(<App />);
 
         const btn = await screen.findByText(/HITL task/);
         fireEvent.click(btn);
 
-        expect(await screen.findByText('Načítavam posúdenie...')).toBeInTheDocument();
+        // Log entries visible
+        expect(await screen.findByText(/Požiadavka prijatá/)).toBeInTheDocument();
+        // Toggle button visible
+        expect(await screen.findByText(/zobraziť Temporal log/)).toBeInTheDocument();
+        // "Posúdenie nedostupné." must NOT appear
         expect(screen.queryByText('Posúdenie nedostupné.')).not.toBeInTheDocument();
+
+        // Click to expand history — agent name and activity visible
+        fireEvent.click(screen.getByText(/zobraziť Temporal log/));
+        expect(await screen.findByText('ProjectakWorkflow')).toBeInTheDocument();
+        const storeTaskNodes = await screen.findAllByText('store_task');
+        expect(storeTaskNodes.length).toBeGreaterThanOrEqual(1);
     });
 });
 

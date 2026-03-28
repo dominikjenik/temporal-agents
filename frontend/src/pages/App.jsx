@@ -3,6 +3,80 @@ import NavBar from "../components/NavBar";
 import { apiService } from "../services/api";
 
 // ---------------------------------------------------------------------------
+// WorkflowHistory — renders decoded Temporal event log
+// ---------------------------------------------------------------------------
+
+const EVENT_STYLES = {
+    workflow_started:   { label: '▶ WORKFLOW', color: 'text-blue-400' },
+    activity_scheduled: { label: '⚡',          color: 'text-yellow-300' },
+    activity_completed: { label: '✓',           color: 'text-green-400' },
+    activity_failed:    { label: '✗',           color: 'text-red-400' },
+    signal:             { label: '⚑ SIGNAL',    color: 'text-purple-400' },
+    workflow_completed: { label: '■ DONE',       color: 'text-green-300' },
+    workflow_failed:    { label: '■ FAILED',     color: 'text-red-400' },
+};
+
+const SOURCE_BADGE = {
+    manager:   'text-blue-500',
+    projektak: 'text-orange-400',
+};
+
+function fmt(val) {
+    if (val === null || val === undefined) return null;
+    return typeof val === 'string' ? val : JSON.stringify(val);
+}
+
+function WorkflowHistory({ history }) {
+    if (history === null) return <p className="p-2 text-gray-500 italic">Načítavam históriu...</p>;
+    if (history === false) return <p className="p-2 text-red-400 italic">História nedostupná.</p>;
+    const events = history.events ?? [];
+    if (!events.length) return <p className="p-2 text-gray-500 italic">Žiadne eventy.</p>;
+
+    // Track last source to render separator when switching manager → projektak
+    let lastSource = null;
+
+    return (
+        <div className="p-2 flex flex-col gap-1.5">
+            {events.map(e => {
+                const separator = lastSource && lastSource !== e.source;
+                lastSource = e.source;
+                const s = EVENT_STYLES[e.kind] ?? { label: e.kind, color: 'text-gray-400' };
+                const name = e.activity || e.signal || e.workflow || '';
+                const isIntent = e.kind === 'activity_completed' && e.activity === 'parse_intent_activity';
+                const input = fmt(e.input);
+                const output = fmt(e.output);
+                return (
+                    <React.Fragment key={`${e.source}-${e.id}`}>
+                        {separator && (
+                            <div className="border-t border-gray-700 my-1 text-gray-600 text-xs text-center">
+                                ── projektak ──
+                            </div>
+                        )}
+                        <div className={`text-xs font-mono ${isIntent ? 'bg-blue-950/40 rounded px-1' : ''}`}>
+                            <div className="flex gap-2 items-baseline">
+                                <span className="text-gray-600 shrink-0">#{e.id}</span>
+                                <span className={`shrink-0 text-xs ${SOURCE_BADGE[e.source] ?? 'text-gray-500'}`}>
+                                    [{e.source}]
+                                </span>
+                                <span className={`shrink-0 ${s.color}`}>{s.label}</span>
+                                <span className="text-gray-200 font-semibold">{name}</span>
+                            </div>
+                            {input  && <div className="ml-8 text-gray-400 break-all">← {input}</div>}
+                            {output && (
+                                <div className={`ml-8 break-all ${isIntent ? 'text-yellow-300 font-semibold' : 'text-gray-200'}`}>
+                                    → {output}
+                                </div>
+                            )}
+                            {e.error && <div className="ml-8 text-red-400 break-all">⚠ {e.error}</div>}
+                        </div>
+                    </React.Fragment>
+                );
+            })}
+        </div>
+    );
+}
+
+// ---------------------------------------------------------------------------
 // TaskList — top panel, polls every second, always visible
 // ---------------------------------------------------------------------------
 
@@ -50,6 +124,9 @@ function TaskList({ onSelect }) {
 
 function TaskDetail({ task, onClose }) {
     const [hitlState, setHitlState] = useState(null);
+    // null = loading, false = error, object = loaded
+    const [history, setHistory] = useState(null);
+    const [historyExpanded, setHistoryExpanded] = useState(false);
     const [comment, setComment] = useState('');
     const [sending, setSending] = useState(false);
     const [confirming, setConfirming] = useState(false);
@@ -67,6 +144,13 @@ function TaskDetail({ task, onClose }) {
         poll();
         const id = setInterval(poll, 1000);
         return () => { alive = false; clearInterval(id); };
+    }, [task.workflow_id]);
+
+    useEffect(() => {
+        if (!task.workflow_id) return;
+        apiService.getHitlHistory(task.workflow_id)
+            .then(data => setHistory(data))
+            .catch(() => setHistory(false));
     }, [task.workflow_id]);
 
     const result = hitlState?.result ? JSON.parse(hitlState.result) : null;
@@ -93,7 +177,7 @@ function TaskDetail({ task, onClose }) {
         try {
             await apiService.confirmHitl(task.workflow_id);
             setDone(true);
-            setTimeout(onClose, 800);
+            setTimeout(onClose, 2000);
         } catch (err) {
             alert(err.message);
         } finally {
@@ -131,17 +215,30 @@ function TaskDetail({ task, onClose }) {
                                 <p className="mt-1 text-yellow-800 dark:text-yellow-200">{result.payload}</p>
                             </div>
                         )}
-                        {log.length > 0 ? (
-                            <div className="bg-gray-50 dark:bg-gray-900 rounded p-2 text-xs font-mono text-gray-500 dark:text-gray-400 flex flex-col gap-0.5 max-h-32 overflow-y-auto">
-                                {log.map((entry, i) => (
-                                    <div key={i} className="flex gap-1.5">
-                                        <span className="text-gray-300 dark:text-gray-600 shrink-0">›</span>
-                                        <span>{entry}</span>
-                                    </div>
-                                ))}
+
+                        {/* Short log — always visible, click to expand full history */}
+                        <div
+                            className="cursor-pointer select-none bg-gray-50 dark:bg-gray-900 rounded p-2 text-xs font-mono text-gray-500 dark:text-gray-400 flex flex-col gap-0.5"
+                            onClick={() => setHistoryExpanded(e => !e)}
+                        >
+                            {log.length > 0 ? log.map((entry, i) => (
+                                <div key={i} className="flex gap-1.5">
+                                    <span className="text-gray-300 dark:text-gray-600 shrink-0">›</span>
+                                    <span>{entry}</span>
+                                </div>
+                            )) : (
+                                <span className="italic text-gray-400">Načítavam posúdenie...</span>
+                            )}
+                            <div className="text-center text-gray-300 dark:text-gray-600 mt-1">
+                                {historyExpanded ? '▲ skryť Temporal log' : '▼ zobraziť Temporal log'}
                             </div>
-                        ) : (
-                            <p className="text-xs text-gray-400 italic">Načítavam posúdenie...</p>
+                        </div>
+
+                        {/* Full Temporal history — expanded on click */}
+                        {historyExpanded && (
+                            <div className="bg-gray-950 rounded max-h-96 overflow-y-auto">
+                                <WorkflowHistory history={history} />
+                            </div>
                         )}
                     </>
                 )}

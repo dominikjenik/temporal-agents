@@ -155,6 +155,18 @@ export const apiService = {
         }
     },
 
+    async getHitlHistory(workflowId) {
+        try {
+            const res = await fetchWithTimeout(
+                `${API_BASE_URL}/hitl/${encodeURIComponent(workflowId)}/history`
+            );
+            return handleResponse(res);
+        } catch (error) {
+            if (error instanceof ApiError) throw error;
+            throw new ApiError('Failed to fetch HITL history', error.status || 500);
+        }
+    },
+
     async getHitlState(workflowId) {
         try {
             const res = await fetchWithTimeout(

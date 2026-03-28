@@ -1,10 +1,11 @@
 import asyncio
+import json as _json
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from temporalio.api.enums.v1 import WorkflowExecutionStatus
+from temporalio.api.enums.v1 import EventType, WorkflowExecutionStatus
 from temporalio.client import Client
 from temporalio.common import WorkflowIDReusePolicy
 from temporalio.exceptions import TemporalError
@@ -147,7 +148,7 @@ async def manager_result(workflow_id: str):
 @app.get("/tasks")
 async def get_tasks():
     tasks = await _fetch_tasks()
-    return [t.model_dump() for t in tasks]
+    return [t.model_dump() for t in tasks if t.status != "confirmed"]
 
 
 # ---------------------------------------------------------------------------
@@ -164,13 +165,27 @@ async def hitl_state(workflow_id: str):
         handle = temporal_client.get_workflow_handle(workflow_id)
         desc = await handle.describe()
 
-        if desc.status == WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_COMPLETED:
-            final_result = await handle.result()
+        _terminal = {
+            WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_COMPLETED,
+            WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_FAILED,
+            WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_TERMINATED,
+            WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_TIMED_OUT,
+            WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_CANCELED,
+        }
+        if desc.status in _terminal:
+            is_ok = desc.status == WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_COMPLETED
+            try:
+                final_result = await handle.result() if is_ok else None
+            except Exception:
+                final_result = None
             return {
                 "result": final_result,
                 "comments": [],
-                "status": "confirmed",
-                "log": ["Workflow ukončený — požiadavka potvrdená"],
+                "status": "confirmed" if is_ok else "failed",
+                "log": [
+                    "Workflow ukončený — požiadavka potvrdená" if is_ok
+                    else f"Workflow skončil s chybou: {desc.status.name}"
+                ],
             }
 
         result = await handle.query("get_result")
@@ -183,6 +198,109 @@ async def hitl_state(workflow_id: str):
         return {"result": result, "comments": comments, "status": status, "log": log}
     except TemporalError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+def _decode_payloads(payloads) -> object:
+    """Decode Temporal Payloads list → Python value (single) or list (multiple)."""
+    if not payloads:
+        return None
+    out = []
+    for p in payloads:
+        try:
+            out.append(_json.loads(p.data))
+        except Exception:
+            try:
+                out.append(p.data.decode("utf-8", errors="replace"))
+            except Exception:
+                out.append("<binary>")
+    return out[0] if len(out) == 1 else out
+
+
+def _parse_history_events(history_events, source: str) -> list[dict]:
+    """Convert raw Temporal history events to structured dicts."""
+    sched: dict[int, str] = {}
+    out = []
+    for e in history_events:
+        et = e.event_type
+        ts = e.event_time.ToJsonString() if e.event_time.seconds else None
+        base = {"id": e.event_id, "time": ts, "source": source}
+
+        if et == EventType.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED:
+            a = e.workflow_execution_started_event_attributes
+            out.append({**base, "kind": "workflow_started",
+                        "workflow": a.workflow_type.name,
+                        "input": _decode_payloads(a.input.payloads)})
+
+        elif et == EventType.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED:
+            a = e.activity_task_scheduled_event_attributes
+            sched[e.event_id] = a.activity_type.name
+            out.append({**base, "kind": "activity_scheduled",
+                        "activity": a.activity_type.name,
+                        "input": _decode_payloads(a.input.payloads)})
+
+        elif et == EventType.EVENT_TYPE_ACTIVITY_TASK_COMPLETED:
+            a = e.activity_task_completed_event_attributes
+            out.append({**base, "kind": "activity_completed",
+                        "activity": sched.get(a.scheduled_event_id, "?"),
+                        "output": _decode_payloads(a.result.payloads)})
+
+        elif et == EventType.EVENT_TYPE_ACTIVITY_TASK_FAILED:
+            a = e.activity_task_failed_event_attributes
+            out.append({**base, "kind": "activity_failed",
+                        "activity": sched.get(a.scheduled_event_id, "?"),
+                        "error": a.failure.message or "unknown"})
+
+        elif et == EventType.EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED:
+            a = e.workflow_execution_signaled_event_attributes
+            out.append({**base, "kind": "signal",
+                        "signal": a.signal_name,
+                        "input": _decode_payloads(a.input.payloads)})
+
+        elif et == EventType.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED:
+            a = e.workflow_execution_completed_event_attributes
+            out.append({**base, "kind": "workflow_completed",
+                        "output": _decode_payloads(a.result.payloads)})
+
+        elif et == EventType.EVENT_TYPE_WORKFLOW_EXECUTION_FAILED:
+            a = e.workflow_execution_failed_event_attributes
+            out.append({**base, "kind": "workflow_failed",
+                        "error": a.failure.message or "unknown"})
+
+    return out
+
+
+@app.get("/hitl/{workflow_id}/history")
+async def hitl_history(workflow_id: str):
+    try:
+        handle = temporal_client.get_workflow_handle(workflow_id)
+        history = await handle.fetch_history()
+
+        # Detect parent workflow from the first event
+        parent_wf_id = None
+        if history.events:
+            first = history.events[0]
+            if first.event_type == EventType.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED:
+                parent = first.workflow_execution_started_event_attributes.parent_workflow_execution
+                if parent.workflow_id:
+                    parent_wf_id = parent.workflow_id
+
+        all_events: list[dict] = []
+
+        # Prepend parent (manager) history so intent resolution is visible first
+        if parent_wf_id:
+            try:
+                parent_history = await temporal_client.get_workflow_handle(parent_wf_id).fetch_history()
+                all_events.extend(_parse_history_events(parent_history.events, "manager"))
+            except Exception:
+                pass
+
+        all_events.extend(_parse_history_events(history.events, "projektak"))
+        return {"events": all_events}
+
+    except TemporalError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/hitl/{workflow_id}/confirm")
