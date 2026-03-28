@@ -6,6 +6,16 @@ from temporal_agents.activities.base import _build_cmd, load_agent_model, load_a
 from temporal_agents.intent_config import INTENTS, PROJECTS
 
 
+def _strip_fences(raw: str) -> str:
+    """Remove markdown code fences if the model wraps output despite instructions."""
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[-1]
+        if raw.endswith("```"):
+            raw = raw[: raw.rfind("```")]
+    return raw.strip()
+
+
 def _validate(raw: str) -> tuple[bool, dict]:
     """Returns (is_valid, parsed_dict). Valid = intent in INTENTS and project in PROJECTS."""
     try:
@@ -48,7 +58,7 @@ async def parse(message: str) -> dict:
         process.kill()
         return {"clarification": "Vypršal časový limit. Skús to znova."}
 
-    raw = stdout.decode().strip()
+    raw = _strip_fences(stdout.decode())
     valid, data = _validate(raw)
     if valid:
         return {"intent": data["intent"], "project": data["project"]}
