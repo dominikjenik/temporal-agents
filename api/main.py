@@ -105,10 +105,9 @@ async def manager_status(workflow_id: str):
         WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_CANCELED,
     }
     if desc.status in _terminal:
-        return {"status": "done", "intent": ""}
+        return {"status": "done"}
     status = await handle.query("get_status")
-    intent = await handle.query("get_intent")
-    return {"status": status, "intent": intent}
+    return {"status": status}
 
 
 @app.get("/manager/{workflow_id}/result")

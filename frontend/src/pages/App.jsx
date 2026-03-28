@@ -318,13 +318,20 @@ export default function App() {
         }
     };
 
-    const startPolling = (wfId) => {
+    const startPolling = (wfId, intent, project) => {
         stopPolling();
         doneRef.current = false;
+        let errorCount = 0;
         pollingRef.current = setInterval(async () => {
             try {
                 const { status } = await apiService.managerStatus(wfId);
-                if (status === 'done' && !doneRef.current) {
+                errorCount = 0;
+                if (status === 'waiting_hitl' && !doneRef.current) {
+                    doneRef.current = true;
+                    stopPolling();
+                    addMessage(`Požiadavka bola uložená, projekt: ${project}, typ: ${intent}`, 'agent');
+                    setLoading(false);
+                } else if (status === 'done' && !doneRef.current) {
                     doneRef.current = true;
                     stopPolling();
                     try {
@@ -336,7 +343,15 @@ export default function App() {
                         setLoading(false);
                     }
                 }
-            } catch {}
+            } catch (e) {
+                errorCount++;
+                if (errorCount >= 5) {
+                    doneRef.current = true;
+                    stopPolling();
+                    addMessage(`Chyba pri sledovaní stavu: ${e.message}`, 'error');
+                    setLoading(false);
+                }
+            }
         }, 1000);
     };
 
@@ -354,7 +369,7 @@ export default function App() {
                 return;
             }
             const { workflow_id } = await apiService.startManager(parsed.intent, parsed.project, trimmed);
-            startPolling(workflow_id);
+            startPolling(workflow_id, parsed.intent, parsed.project);
         } catch (err) {
             addMessage(`Chyba: ${err.message}`, 'error');
             setLoading(false);
