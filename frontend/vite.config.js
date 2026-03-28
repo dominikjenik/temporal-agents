@@ -9,6 +9,7 @@ export default defineConfig({
     setupFiles: './src/test-setup.js',
   },
   server: {
+    port: 8003,
     open: true,
     host: true,
     proxy: {

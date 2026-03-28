@@ -1,5 +1,6 @@
 import asyncio
 import json as _json
+import time
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
@@ -21,7 +22,7 @@ temporal_client: Optional[Client] = None
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=["http://localhost:8003", "http://127.0.0.1:8003"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -31,7 +32,15 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     global temporal_client
-    temporal_client = await Client.connect("localhost:7233")
+    last_err = None
+    for attempt in range(30):
+        try:
+            temporal_client = await Client.connect("localhost:7233")
+            return
+        except Exception as e:
+            last_err = e
+            await asyncio.sleep(2)
+    raise RuntimeError(f"Temporal not ready after 60s: {last_err}")
 
 
 @app.get("/")
@@ -115,20 +124,34 @@ class ManagerRequest(BaseModel):
 
 @app.post("/manager/start")
 async def manager_start(body: ManagerRequest):
-    workflow_id = f"manager-{body.user_message[:30].replace(' ', '-')}"
-    await temporal_client.start_workflow(
-        ManagerWorkflow.run,
-        ManagerInput(user_message=body.user_message),
-        id=workflow_id,
-        task_queue=TASK_QUEUE,
-        id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
-    )
+    ts = int(time.time() * 1000)
+    slug = body.user_message[:24].replace(' ', '-')
+    workflow_id = f"manager-{ts}-{slug}"
+    try:
+        await temporal_client.start_workflow(
+            ManagerWorkflow.run,
+            ManagerInput(user_message=body.user_message),
+            id=workflow_id,
+            task_queue=TASK_QUEUE,
+        )
+    except TemporalError as e:
+        raise HTTPException(status_code=500, detail=str(e))
     return {"workflow_id": workflow_id}
 
 
 @app.get("/manager/{workflow_id}/status")
 async def manager_status(workflow_id: str):
     handle = temporal_client.get_workflow_handle(workflow_id)
+    desc = await handle.describe()
+    _terminal = {
+        WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_COMPLETED,
+        WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_FAILED,
+        WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_TERMINATED,
+        WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_TIMED_OUT,
+        WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_CANCELED,
+    }
+    if desc.status in _terminal:
+        return {"status": "done", "intent": ""}
     status = await handle.query("get_status")
     intent = await handle.query("get_intent")
     return {"status": status, "intent": intent}
@@ -137,8 +160,11 @@ async def manager_status(workflow_id: str):
 @app.get("/manager/{workflow_id}/result")
 async def manager_result(workflow_id: str):
     handle = temporal_client.get_workflow_handle(workflow_id)
-    result = await handle.result()
-    return {"result": result}
+    try:
+        result = await handle.result()
+        return {"result": result}
+    except TemporalError as e:
+        return {"result": f"Chyba: {str(e)[:300]}"}
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +242,27 @@ def _decode_payloads(payloads) -> object:
     return out[0] if len(out) == 1 else out
 
 
+def _extract_intent(output) -> str | None:
+    """Extract intent value from activity/workflow output, if present.
+
+    Handles two cases:
+    - JSON string with 'intent' key (e.g. parse_intent_activity, workflow_completed)
+    - Task dict from store_task whose title encodes the decision (e.g. '[DUPLICATE] ...')
+    """
+    if isinstance(output, str):
+        try:
+            parsed = _json.loads(output)
+            if isinstance(parsed, dict):
+                return parsed.get("intent") or None
+        except (_json.JSONDecodeError, TypeError):
+            pass
+    if isinstance(output, dict):
+        title = output.get("title", "")
+        if isinstance(title, str) and "[DUPLICATE]" in title:
+            return "resolved_as_duplicate"
+    return None
+
+
 def _parse_history_events(history_events, source: str) -> list[dict]:
     """Convert raw Temporal history events to structured dicts."""
     sched: dict[int, str] = {}
@@ -240,9 +287,13 @@ def _parse_history_events(history_events, source: str) -> list[dict]:
 
         elif et == EventType.EVENT_TYPE_ACTIVITY_TASK_COMPLETED:
             a = e.activity_task_completed_event_attributes
-            out.append({**base, "kind": "activity_completed",
-                        "activity": sched.get(a.scheduled_event_id, "?"),
-                        "output": _decode_payloads(a.result.payloads)})
+            act_name = sched.get(a.scheduled_event_id, "?")
+            output = _decode_payloads(a.result.payloads)
+            event = {**base, "kind": "activity_completed", "activity": act_name, "output": output}
+            intent = _extract_intent(output)
+            if intent:
+                event["intent"] = intent
+            out.append(event)
 
         elif et == EventType.EVENT_TYPE_ACTIVITY_TASK_FAILED:
             a = e.activity_task_failed_event_attributes
@@ -258,8 +309,12 @@ def _parse_history_events(history_events, source: str) -> list[dict]:
 
         elif et == EventType.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED:
             a = e.workflow_execution_completed_event_attributes
-            out.append({**base, "kind": "workflow_completed",
-                        "output": _decode_payloads(a.result.payloads)})
+            output = _decode_payloads(a.result.payloads)
+            event = {**base, "kind": "workflow_completed", "output": output}
+            intent = _extract_intent(output)
+            if intent:
+                event["intent"] = intent
+            out.append(event)
 
         elif et == EventType.EVENT_TYPE_WORKFLOW_EXECUTION_FAILED:
             a = e.workflow_execution_failed_event_attributes
@@ -275,14 +330,9 @@ async def hitl_history(workflow_id: str):
         handle = temporal_client.get_workflow_handle(workflow_id)
         history = await handle.fetch_history()
 
-        # Detect parent workflow from the first event
-        parent_wf_id = None
-        if history.events:
-            first = history.events[0]
-            if first.event_type == EventType.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED:
-                parent = first.workflow_execution_started_event_attributes.parent_workflow_execution
-                if parent.workflow_id:
-                    parent_wf_id = parent.workflow_id
+        # Derive parent (manager) workflow ID from naming convention:
+        # projektak ID is always "projektak-{manager_workflow_id}"
+        parent_wf_id = workflow_id[len("projektak-"):] if workflow_id.startswith("projektak-") else None
 
         all_events: list[dict] = []
 

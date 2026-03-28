@@ -3,21 +3,37 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-echo "==> Starting Temporal server (Podman)..."
+echo "==> Stopping any running processes..."
+pkill -f "temporal_agents.workers.worker" 2>/dev/null || true
+pkill -f "uvicorn api.main:app" 2>/dev/null || true
+lsof -ti:8001 2>/dev/null | xargs -r kill -9 2>/dev/null || true
+pkill -f "vite" 2>/dev/null || true
+lsof -ti:8003 2>/dev/null | xargs -r kill -9 2>/dev/null || true
+sleep 1
+
+echo "==> Restarting Temporal server (Podman)..."
+podman compose -f "$SCRIPT_DIR/docker-compose.yml" down
 podman compose -f "$SCRIPT_DIR/docker-compose.yml" up -d
 
-echo "==> Waiting for Temporal server on localhost:7233 (max 60s)..."
-for i in $(seq 1 60); do
-    if nc -z localhost 7233 2>/dev/null; then
-        echo "    Temporal server is ready (${i}s)"
+echo "==> Waiting for Temporal gRPC on localhost:7233 (max 90s)..."
+for i in $(seq 1 90); do
+    if temporal operator cluster health 2>/dev/null | grep -qi "SERVING"; then
+        echo "    Temporal gRPC ready via CLI (${i}s)"
         break
+    elif nc -z localhost 7233 2>/dev/null; then
+        # Port open but gRPC may still be initializing — extra buffer
+        if [ "$i" -ge 10 ]; then
+            echo "    Port 7233 open, assuming gRPC ready (${i}s)"
+            break
+        fi
     fi
-    if [ "$i" -eq 60 ]; then
-        echo "ERROR: Temporal server not ready after 60s, aborting."
+    if [ "$i" -eq 90 ]; then
+        echo "ERROR: Temporal not ready after 90s, aborting."
         exit 1
     fi
     sleep 1
 done
+sleep 2
 
 echo "==> Starting worker..."
 cd "$SCRIPT_DIR"

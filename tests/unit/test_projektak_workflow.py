@@ -1,11 +1,12 @@
 """Tests for ProjectakWorkflow and ManagerWorkflow new_feature routing.
 
-Test 1: ProjectakWorkflow resolves on confirm — returns {intent: "duplicate", payload: ...} JSON.
+Test 1: ProjectakWorkflow resolves on confirm — returns {intent: "duplicate_resolved", payload: ...} JSON.
 Test 2: ProjectakWorkflow stores HITL task and updates status to 'confirmed'.
 Test 3: ProjectakWorkflow handles comment signal then resolves on confirm.
 Test 4: ManagerWorkflow routes new_feature intent → starts ProjectakWorkflow child.
 Test 5: End-to-end — real user message → Manager → Projektak HITL waiting state.
 Test 6: ProjectakWorkflow log contains key execution steps exposed via get_log query.
+Test 7: ProjectakWorkflow intent progresses: duplicate_suggested (running) → duplicate_resolved (after confirm).
 """
 import json
 import uuid
@@ -67,7 +68,7 @@ def _make_update_status_mock(calls: list):
 # ---------------------------------------------------------------------------
 
 async def test_projektak_confirm_returns_duplicate_json():
-    """Confirm signal → result is JSON {intent: 'duplicate', payload: '...'}."""
+    """Confirm signal → result is JSON {intent: 'resolved_as_duplicate', payload: '...'}."""
     async with await WorkflowEnvironment.start_time_skipping() as env:
         async with Worker(
             env.client,
@@ -88,7 +89,7 @@ async def test_projektak_confirm_returns_duplicate_json():
             result = await handle.result()
 
     data = json.loads(result)
-    assert data["intent"] == "duplicate"
+    assert data["intent"] == "duplicate_resolved"
     assert "payload" in data
     assert len(data["payload"]) > 0
 
@@ -157,7 +158,7 @@ async def test_projektak_handles_comment_then_confirm():
             result = await handle.result()
 
     data = json.loads(result)
-    assert data["intent"] == "duplicate"
+    assert data["intent"] == "duplicate_resolved"
     assert len(comments) == 1
     assert comments[0]["user"] == "Toto nie je duplikát, je to nová funkcia."
     assert "bot" in comments[0]
@@ -275,3 +276,44 @@ async def test_projektak_log_contains_key_steps():
 
     # After confirm: confirmation entry appended
     assert any("Potvrdenie" in e for e in log_after)
+
+
+# ---------------------------------------------------------------------------
+# Test 7: intent progresses from duplicate_suggested → duplicate_resolved
+# ---------------------------------------------------------------------------
+
+async def test_projektak_intent_two_phase():
+    """While running: get_result returns 'duplicate_suggested'.
+    After confirm: run() returns 'duplicate_resolved'."""
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        async with Worker(
+            env.client,
+            task_queue="test-projektak-intent",
+            workflows=[ProjectakWorkflow],
+            activities=[
+                _make_store_task_mock([]),
+                _make_update_status_mock([]),
+            ],
+        ):
+            handle = await env.client.start_workflow(
+                ProjectakWorkflow.run,
+                ProjectakInput(user_message="Add search feature"),
+                id="test-projektak-intent-value",
+                task_queue="test-projektak-intent",
+            )
+            # While HITL is pending: get_result must show duplicate_suggested
+            suggested = await _poll_query(
+                handle, "get_result",
+                lambda r: json.loads(r).get("intent") == "duplicate_suggested",
+            )
+            assert json.loads(suggested)["intent"] == "duplicate_suggested"
+
+            await handle.signal("confirm")
+            result = await handle.result()
+
+    data = json.loads(result)
+    assert data["intent"] == "duplicate_resolved", (
+        f"Expected 'duplicate_resolved', got '{data['intent']}'"
+    )
+    assert data["intent"] != "resolved_as_duplicate"
+    assert data["intent"] != "duplicate"

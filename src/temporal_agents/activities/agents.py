@@ -1,11 +1,10 @@
 import asyncio
 import json
-import re
 
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
-from .base import ClaudeActivityInput, ClaudeActivityOutput, _heartbeat_loop, load_agent_model, load_agent_prompt, run_claude_activity
+from .base import ClaudeActivityInput, ClaudeActivityOutput, _heartbeat_loop, run_claude_activity
 
 
 @activity.defn
@@ -28,43 +27,25 @@ async def devops_zbornik_activity(task: str) -> ClaudeActivityOutput:
     return await run_claude_activity(ClaudeActivityInput(agent_name="devops-zbornik", task=task))
 
 
-def _extract_intent(raw: str) -> str:
-    """Parse intent JSON from LLM output. Pure function — testable without Temporal context."""
-    match = re.search(r'\{[^{}]*"intent"[^{}]*\}', raw)
-    if match:
-        try:
-            parsed = json.loads(match.group())
-            return json.dumps({"intent": parsed.get("intent", "unknown")})
-        except json.JSONDecodeError:
-            pass
-    return json.dumps({"intent": "unknown"})
+
+_STATUS_KEYWORDS = [
+    "co na praci", "co je nove", "aku mame robotu", "aké máme",
+    "co mame", "co máme", "ulohy", "úlohy", "tasks", "pending",
+    "backlog", "what's new", "what is new", "project status",
+]
 
 
 @activity.defn
 async def parse_intent_activity(user_message: str) -> str:
-    """Extract intent from user message via claude -p (always, regardless of TEMPORAL_RUNNER).
-    Returns JSON string e.g. '{"intent": "project_status"}'.
-    Claude is used directly because intent extraction requires precise JSON output,
-    not agentic behaviour (which Cline would produce).
+    """Dummy rule-based intent classifier — no LLM.
+    Returns JSON string e.g. '{"intent": "new_feature"}'.
     """
     activity.heartbeat()
-    system_prompt = load_agent_prompt("manager")
-    model = load_agent_model("manager")
-    cmd = [
-        "claude", "--dangerously-skip-permissions",
-        "-p", user_message,
-        "--system-prompt", system_prompt,
-    ]
-    if model:
-        cmd += ["--model", model]
-    process = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout_bytes, _ = await process.communicate()
-    raw = stdout_bytes.decode("utf-8", errors="replace").strip()
-    return _extract_intent(raw)
+    msg = user_message.lower()
+    for kw in _STATUS_KEYWORDS:
+        if kw in msg:
+            return json.dumps({"intent": "project_status"})
+    return json.dumps({"intent": "new_feature"})
 
 
 @activity.defn

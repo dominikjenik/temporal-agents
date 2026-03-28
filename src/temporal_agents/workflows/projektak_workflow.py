@@ -2,7 +2,7 @@
 
 Flow:
   1. Store HITL task in DB (type='hitl', status='pending')
-  2. Expose result JSON {intent: "duplicate", payload: "..."} via get_result query
+  2. Expose result JSON {intent: "resolved_as_duplicate", payload: "..."} via get_result query
   3. Loop: wait for confirm or comment signals
      - comment → append to conversation history, continue waiting
      - confirm → update task status to 'confirmed', return result JSON
@@ -69,7 +69,7 @@ class ProjectakWorkflow:
             start_to_close_timeout=timedelta(seconds=10),
             retry_policy=RetryPolicy(maximum_attempts=1),
         )
-        return json.dumps({"intent": "duplicate", "payload": _DUPLICATE_PAYLOAD})
+        return json.dumps({"intent": "duplicate_resolved", "payload": _DUPLICATE_PAYLOAD})
 
     @workflow.signal
     def confirm(self) -> None:
@@ -85,7 +85,7 @@ class ProjectakWorkflow:
 
     @workflow.query
     def get_result(self) -> str:
-        return json.dumps({"intent": "duplicate", "payload": _DUPLICATE_PAYLOAD})
+        return json.dumps({"intent": "duplicate_suggested", "payload": _DUPLICATE_PAYLOAD})
 
     @workflow.query
     def get_comments(self) -> list:

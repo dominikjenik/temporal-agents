@@ -42,7 +42,7 @@ function WorkflowHistory({ history }) {
                 lastSource = e.source;
                 const s = EVENT_STYLES[e.kind] ?? { label: e.kind, color: 'text-gray-400' };
                 const name = e.activity || e.signal || e.workflow || '';
-                const isIntent = e.kind === 'activity_completed' && e.activity === 'parse_intent_activity';
+                const isIntent = !!e.intent;
                 const input = fmt(e.input);
                 const output = fmt(e.output);
                 return (
@@ -61,11 +61,12 @@ function WorkflowHistory({ history }) {
                                 <span className={`shrink-0 ${s.color}`}>{s.label}</span>
                                 <span className="text-gray-200 font-semibold">{name}</span>
                             </div>
-                            {input  && <div className="ml-8 text-gray-400 break-all">← {input}</div>}
+                            {input && <div className="ml-8 text-gray-400 break-all">← {input}</div>}
+                            {isIntent && (
+                                <div className="ml-8 text-yellow-300 font-semibold">→ intent: {e.intent}</div>
+                            )}
                             {output && (
-                                <div className={`ml-8 break-all ${isIntent ? 'text-yellow-300 font-semibold' : 'text-gray-200'}`}>
-                                    → {output}
-                                </div>
+                                <div className="ml-8 text-gray-200 break-all">→ {output}</div>
                             )}
                             {e.error && <div className="ml-8 text-red-400 break-all">⚠ {e.error}</div>}
                         </div>
@@ -303,6 +304,7 @@ export default function App() {
     const [loading, setLoading] = useState(false);
     const [selectedTask, setSelectedTask] = useState(null);
     const pollingRef = useRef(null);
+    const doneRef = useRef(false);
     const messagesEndRef = useRef(null);
 
     const addMessage = (text, type = 'info') => {
@@ -318,14 +320,21 @@ export default function App() {
 
     const startPolling = (wfId) => {
         stopPolling();
+        doneRef.current = false;
         pollingRef.current = setInterval(async () => {
             try {
                 const { status } = await apiService.managerStatus(wfId);
-                if (status === 'done') {
+                if (status === 'done' && !doneRef.current) {
+                    doneRef.current = true;
                     stopPolling();
-                    const { result } = await apiService.managerResult(wfId);
-                    addMessage(result, 'agent');
-                    setLoading(false);
+                    try {
+                        const { result } = await apiService.managerResult(wfId);
+                        addMessage(result, 'agent');
+                    } catch (e) {
+                        addMessage(`Chyba: ${e.message}`, 'error');
+                    } finally {
+                        setLoading(false);
+                    }
                 }
             } catch {}
         }, 1000);
