@@ -24,7 +24,7 @@ async def capture_lesson(
     async with aiosqlite.connect(_db_path()) as db:
         await _init_db(db)
         await db.execute(
-            "INSERT INTO tasks (id, project, title, priority, status, type, workflow_id, created_at) "
+            "INSERT INTO hitl (id, project, title, priority, status, type, workflow_id, created_at) "
             "VALUES (?, ?, ?, ?, 'pending', 'lesson', ?, ?)",
             (str(record_id), "temporal", title, 5, workflow_id, now),
         )

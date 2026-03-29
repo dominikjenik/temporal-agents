@@ -7,25 +7,25 @@ import pytest
 
 
 # ---------------------------------------------------------------------------
-# Pydantic model
+# Pydantic model                                              [temporal-1]
 # ---------------------------------------------------------------------------
 
 class TestDBQueryModelDefaults:
     def test_dbquery_model_defaults(self):
         from temporal_agents.activities.hitl_db import DBQuery
-        query = DBQuery(table="tasks")
+        query = DBQuery(table="hitl")
         assert query.filter == {}
         assert query.order == ""
         assert query.limit == 100
 
 
 # ---------------------------------------------------------------------------
-# store_task
+# store_task                                                  [temporal-1]
 # ---------------------------------------------------------------------------
 
 class TestStoreTask:
     async def test_store_regular_task(self, tmp_path):
-        db_url = f"sqlite:///{tmp_path}/tasks.db"
+        db_url = f"sqlite:///{tmp_path}/hitl.db"
         with patch("temporal_agents.activities.hitl_db.DB_URL", db_url):
             from temporal_agents.activities.hitl_db import store_task
             result = await store_task(project="zbornik", title="Fix crash")
@@ -41,7 +41,7 @@ class TestStoreTask:
         assert "T" in result.created_at  # ISO format
 
     async def test_store_hitl_task(self, tmp_path):
-        db_url = f"sqlite:///{tmp_path}/tasks.db"
+        db_url = f"sqlite:///{tmp_path}/hitl.db"
         with patch("temporal_agents.activities.hitl_db.DB_URL", db_url):
             from temporal_agents.activities.hitl_db import store_task
             result = await store_task(
@@ -57,7 +57,7 @@ class TestStoreTask:
         assert result.priority == 1
 
     async def test_store_task_default_priority(self, tmp_path):
-        db_url = f"sqlite:///{tmp_path}/tasks.db"
+        db_url = f"sqlite:///{tmp_path}/hitl.db"
         with patch("temporal_agents.activities.hitl_db.DB_URL", db_url):
             from temporal_agents.activities.hitl_db import store_task
             result = await store_task(project="zbornik", title="Some task")
@@ -65,12 +65,12 @@ class TestStoreTask:
 
 
 # ---------------------------------------------------------------------------
-# list_tasks
+# list_tasks                                                  [temporal-1]
 # ---------------------------------------------------------------------------
 
 class TestListTasks:
     async def test_list_tasks_returns_pending_only(self, tmp_path):
-        db_url = f"sqlite:///{tmp_path}/tasks.db"
+        db_url = f"sqlite:///{tmp_path}/hitl.db"
         with patch("temporal_agents.activities.hitl_db.DB_URL", db_url):
             from temporal_agents.activities.hitl_db import list_tasks, store_task
             import aiosqlite
@@ -80,7 +80,7 @@ class TestListTasks:
 
             db_path = db_url.removeprefix("sqlite:///")
             async with aiosqlite.connect(db_path) as db:
-                await db.execute("UPDATE tasks SET status='done' WHERE id=?", (str(done.id),))
+                await db.execute("UPDATE hitl SET status='done' WHERE id=?", (str(done.id),))
                 await db.commit()
 
             results = await list_tasks(status="pending")
@@ -90,7 +90,7 @@ class TestListTasks:
         assert done.id not in ids
 
     async def test_list_tasks_sorted_by_priority(self, tmp_path):
-        db_url = f"sqlite:///{tmp_path}/tasks.db"
+        db_url = f"sqlite:///{tmp_path}/hitl.db"
         with patch("temporal_agents.activities.hitl_db.DB_URL", db_url):
             from temporal_agents.activities.hitl_db import list_tasks, store_task
             await store_task(project="zbornik", title="Low", priority=9)
@@ -102,7 +102,7 @@ class TestListTasks:
         assert priorities == sorted(priorities)
 
     async def test_list_tasks_hitl_and_task_together(self, tmp_path):
-        db_url = f"sqlite:///{tmp_path}/tasks.db"
+        db_url = f"sqlite:///{tmp_path}/hitl.db"
         with patch("temporal_agents.activities.hitl_db.DB_URL", db_url):
             from temporal_agents.activities.hitl_db import list_tasks, store_task
             t = await store_task(project="zbornik", title="Regular", type="task")
@@ -115,30 +115,30 @@ class TestListTasks:
 
 
 # ---------------------------------------------------------------------------
-# execute_db_query
+# execute_db_query                                            [temporal-1]
 # ---------------------------------------------------------------------------
 
 class TestExecuteDbQuery:
     async def test_unknown_table_raises(self, tmp_path):
-        db_url = f"sqlite:///{tmp_path}/tasks.db"
+        db_url = f"sqlite:///{tmp_path}/hitl.db"
         with patch("temporal_agents.activities.hitl_db.DB_URL", db_url):
             from temporal_agents.activities.hitl_db import DBQuery, execute_db_query
             with pytest.raises(ValueError):
                 await execute_db_query(DBQuery(table="users"))
 
     async def test_query_tasks_table(self, tmp_path):
-        db_url = f"sqlite:///{tmp_path}/tasks.db"
+        db_url = f"sqlite:///{tmp_path}/hitl.db"
         with patch("temporal_agents.activities.hitl_db.DB_URL", db_url):
             from temporal_agents.activities.hitl_db import DBQuery, execute_db_query, store_task
             await store_task(project="zbornik", title="Query test")
-            results = await execute_db_query(DBQuery(table="tasks"))
+            results = await execute_db_query(DBQuery(table="hitl"))
 
         assert isinstance(results, list)
         assert len(results) >= 1
         assert all(isinstance(row, dict) for row in results)
 
     async def test_query_with_filter(self, tmp_path):
-        db_url = f"sqlite:///{tmp_path}/tasks.db"
+        db_url = f"sqlite:///{tmp_path}/hitl.db"
         with patch("temporal_agents.activities.hitl_db.DB_URL", db_url):
             from temporal_agents.activities.hitl_db import DBQuery, execute_db_query, store_task
             import aiosqlite
@@ -148,10 +148,10 @@ class TestExecuteDbQuery:
 
             db_path = db_url.removeprefix("sqlite:///")
             async with aiosqlite.connect(db_path) as db:
-                await db.execute("UPDATE tasks SET status='done' WHERE id=?", (str(r2.id),))
+                await db.execute("UPDATE hitl SET status='done' WHERE id=?", (str(r2.id),))
                 await db.commit()
 
-            results = await execute_db_query(DBQuery(table="tasks", filter={"status": "pending"}))
+            results = await execute_db_query(DBQuery(table="hitl", filter={"status": "pending"}))
 
         statuses = [row["status"] for row in results]
         assert all(s == "pending" for s in statuses)

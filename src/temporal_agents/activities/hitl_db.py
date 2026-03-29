@@ -11,7 +11,7 @@ from temporalio import activity
 DB_URL: str = os.environ.get("HITL_DB_URL", "sqlite:////tmp/hitl.db")
 
 # Only these tables are allowed in execute_db_query
-WHITELIST_TABLES = {"tasks"}
+WHITELIST_TABLES = {"hitl"}
 
 
 def _db_path() -> str:
@@ -25,7 +25,7 @@ def _db_path() -> str:
 
 async def _init_db(db: aiosqlite.Connection) -> None:
     await db.execute("""
-        CREATE TABLE IF NOT EXISTS tasks (
+        CREATE TABLE IF NOT EXISTS hitl (
             id TEXT PRIMARY KEY,
             project TEXT NOT NULL,
             title TEXT NOT NULL,
@@ -44,7 +44,7 @@ class Task(BaseModel):
     project: str
     title: str
     priority: int = 5
-    status: Literal['pending', 'in_progress', 'done', 'confirmed', 'cancelled'] = 'pending'
+    status: Literal['pending', 'in_progress', 'done', 'cancelled'] = 'pending'
     type: Literal['task', 'hitl', 'lesson'] = 'task'
     workflow_id: Optional[str] = None
     created_at: str
@@ -71,7 +71,7 @@ async def store_task(
     async with aiosqlite.connect(_db_path()) as db:
         await _init_db(db)
         await db.execute(
-            "INSERT INTO tasks (id, project, title, priority, status, type, workflow_id, created_at) "
+            "INSERT INTO hitl (id, project, title, priority, status, type, workflow_id, created_at) "
             "VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)",
             (str(record_id), project, title, priority, type, workflow_id, now.isoformat())
         )
@@ -95,12 +95,12 @@ async def _fetch_tasks(status: Optional[str] = None) -> list[Task]:
         db.row_factory = aiosqlite.Row
         if status:
             cursor = await db.execute(
-                "SELECT * FROM tasks WHERE status = ? ORDER BY priority ASC, project ASC",
+                "SELECT * FROM hitl WHERE status = ? ORDER BY priority ASC, project ASC",
                 (status,)
             )
         else:
             cursor = await db.execute(
-                "SELECT * FROM tasks ORDER BY priority ASC, project ASC"
+                "SELECT * FROM hitl ORDER BY priority ASC, project ASC"
             )
         rows = await cursor.fetchall()
     return [
@@ -130,7 +130,7 @@ async def update_task_status(workflow_id: str, status: str) -> None:
     async with aiosqlite.connect(_db_path()) as db:
         await _init_db(db)
         await db.execute(
-            "UPDATE tasks SET status = ? WHERE workflow_id = ?",
+            "UPDATE hitl SET status = ? WHERE workflow_id = ?",
             (status, workflow_id)
         )
         await db.commit()

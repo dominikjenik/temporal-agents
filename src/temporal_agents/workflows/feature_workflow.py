@@ -74,7 +74,7 @@ class FeatureWorkflow:
         self._log.append("Potvrdenie prijaté — workflow sa ukončuje")
         await workflow.execute_activity(
             update_task_status,
-            args=[wf_id, "confirmed"],
+            args=[wf_id, "done"],
             start_to_close_timeout=DB_TIMEOUT,
             retry_policy=RETRY_ONCE,
         )

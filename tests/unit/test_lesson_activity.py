@@ -7,6 +7,7 @@ import aiosqlite
 import pytest
 
 
+# [temporal-3]
 class TestCaptureLessonWritesToDB:
     """capture_lesson must insert a 'lesson' row into the tasks DB."""
 
@@ -19,7 +20,7 @@ class TestCaptureLessonWritesToDB:
 
         async with aiosqlite.connect(db_file) as db:
             db.row_factory = aiosqlite.Row
-            cursor = await db.execute("SELECT * FROM tasks WHERE type = 'lesson'")
+            cursor = await db.execute("SELECT * FROM hitl WHERE type = 'lesson'")
             rows = await cursor.fetchall()
 
         assert len(rows) == 1
@@ -30,6 +31,7 @@ class TestCaptureLessonWritesToDB:
         assert rows[0]["workflow_id"] == "wf-123"
 
 
+# [temporal-3]
 class TestCaptureLessonHeartbeat:
     """capture_lesson must call activity.heartbeat() at least once."""
 
@@ -43,6 +45,7 @@ class TestCaptureLessonHeartbeat:
         mock_hb.assert_called()
 
 
+# [temporal-3]
 class TestCaptureLessonOutcomeInTitle:
     """Outcome (success/failure) must appear uppercased in the task title."""
 
@@ -55,7 +58,7 @@ class TestCaptureLessonOutcomeInTitle:
                 await capture_lesson("wf-789", "devops-zbornik", outcome, "Deploy lesson")
 
         async with aiosqlite.connect(db_file) as db:
-            cursor = await db.execute("SELECT title FROM tasks WHERE type = 'lesson'")
+            cursor = await db.execute("SELECT title FROM hitl WHERE type = 'lesson'")
             row = await cursor.fetchone()
 
         assert outcome.upper() in row[0]
