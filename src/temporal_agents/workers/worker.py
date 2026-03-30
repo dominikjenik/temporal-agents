@@ -4,7 +4,6 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from temporal_agents.activities.hitl_db import execute_db_query, list_tasks, store_task, update_task_status
-from temporal_agents.activities.lesson import capture_lesson
 from temporal_agents.workflows.feature_workflow import FeatureWorkflow
 
 WORKFLOWS = [FeatureWorkflow]
@@ -13,7 +12,6 @@ ACTIVITIES = [
     list_tasks,
     update_task_status,
     execute_db_query,
-    capture_lesson,
 ]
 
 

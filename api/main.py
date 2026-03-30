@@ -1,6 +1,5 @@
 import asyncio
 import json as _json
-import time
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
@@ -10,11 +9,8 @@ from temporalio.api.enums.v1 import EventType, WorkflowExecutionStatus
 from temporalio.client import Client
 from temporalio.exceptions import TemporalError
 
-from temporal_agents.activities.hitl_db import _fetch_tasks
-from temporal_agents.intent_parser import parse as parse_intent
-from temporal_agents.command_dispatcher import dispatch
-
-TASK_QUEUE = "temporal-agentic-workflow"
+from temporal_agents.activities.hitl_db import _fetch_tasks, _fetch_requirements
+from temporal_agents.intent_parser import intent_parser_resolve
 
 app = FastAPI()
 temporal_client: Optional[Client] = None
@@ -48,50 +44,27 @@ def root():
 
 
 # ---------------------------------------------------------------------------
-# IntentParser (API endpoint)
+# IntentResolver — full pipeline: parse → validate → route → dispatch
+# API passes message + Temporal client. IntentResolver handles the rest.
 # ---------------------------------------------------------------------------
 
-class ParseRequest(BaseModel):
+class RequestBody(BaseModel):
     message: str
 
 
-@app.post("/intent/parse")
-async def intent_parse(body: ParseRequest):
-    result = await parse_intent(body.message)
-    return result
-
-
-# ---------------------------------------------------------------------------
-# Manager (CommandDispatcher → FeatureWorkflow / ...)
-# ---------------------------------------------------------------------------
-
-class ManagerRequest(BaseModel):
-    intent: str
-    project: str
-    user_message: str
-
-
-@app.post("/manager/start")
-async def manager_start(body: ManagerRequest):
-    ts = int(time.time() * 1000)
-    slug = body.user_message[:24].replace(' ', '-')
-    workflow_id = f"{body.intent}-{ts}-{slug}"
+@app.post("/request")
+async def handle_request(body: RequestBody):
     try:
-        wf_class, wf_input = dispatch(body.intent, body.project, body.user_message)
-        await temporal_client.start_workflow(
-            wf_class.run,
-            wf_input,
-            id=workflow_id,
-            task_queue=TASK_QUEUE,
-        )
+        return await intent_parser_resolve(body.message, temporal_client)
     except NotImplementedError as e:
         raise HTTPException(status_code=501, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
     except TemporalError as e:
         raise HTTPException(status_code=500, detail=str(e))
-    return {"workflow_id": workflow_id}
 
+
+# ---------------------------------------------------------------------------
+# Workflow status + result
+# ---------------------------------------------------------------------------
 
 @app.get("/manager/{workflow_id}/status")
 async def manager_status(workflow_id: str):
@@ -127,7 +100,11 @@ async def manager_result(workflow_id: str):
 @app.get("/tasks")
 async def get_tasks():
     tasks = await _fetch_tasks()
-    return [t.model_dump() for t in tasks if t.status != "confirmed"]
+    requirements = await _fetch_requirements()
+    return (
+        [t.model_dump() for t in tasks if t.status != "confirmed"]
+        + [r.model_dump() for r in requirements]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +120,6 @@ async def hitl_state(workflow_id: str):
     try:
         handle = temporal_client.get_workflow_handle(workflow_id)
         desc = await handle.describe()
-
         _terminal = {
             WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_COMPLETED,
             WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_FAILED,
@@ -166,7 +142,6 @@ async def hitl_state(workflow_id: str):
                     else f"Workflow skončil s chybou: {desc.status.name}"
                 ],
             }
-
         result = await handle.query("get_result")
         comments = await handle.query("get_comments")
         status = await handle.query("get_status")
@@ -180,7 +155,6 @@ async def hitl_state(workflow_id: str):
 
 
 def _decode_payloads(payloads) -> object:
-    """Decode Temporal Payloads list → Python value (single) or list (multiple)."""
     if not payloads:
         return None
     out = []
@@ -196,12 +170,6 @@ def _decode_payloads(payloads) -> object:
 
 
 def _extract_intent(output) -> str | None:
-    """Extract intent value from activity/workflow output, if present.
-
-    Handles two cases:
-    - JSON string with 'intent' key (e.g. parse_intent_activity, workflow_completed)
-    - Task dict from store_task whose title encodes the decision (e.g. '[DUPLICATE] ...')
-    """
     if isinstance(output, str):
         try:
             parsed = _json.loads(output)
@@ -217,7 +185,6 @@ def _extract_intent(output) -> str | None:
 
 
 def _parse_history_events(history_events, source: str) -> list[dict]:
-    """Convert raw Temporal history events to structured dicts."""
     sched: dict[int, str] = {}
     out = []
     for e in history_events:
@@ -230,14 +197,12 @@ def _parse_history_events(history_events, source: str) -> list[dict]:
             out.append({**base, "kind": "workflow_started",
                         "workflow": a.workflow_type.name,
                         "input": _decode_payloads(a.input.payloads)})
-
         elif et == EventType.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED:
             a = e.activity_task_scheduled_event_attributes
             sched[e.event_id] = a.activity_type.name
             out.append({**base, "kind": "activity_scheduled",
                         "activity": a.activity_type.name,
                         "input": _decode_payloads(a.input.payloads)})
-
         elif et == EventType.EVENT_TYPE_ACTIVITY_TASK_COMPLETED:
             a = e.activity_task_completed_event_attributes
             act_name = sched.get(a.scheduled_event_id, "?")
@@ -247,19 +212,16 @@ def _parse_history_events(history_events, source: str) -> list[dict]:
             if intent:
                 event["intent"] = intent
             out.append(event)
-
         elif et == EventType.EVENT_TYPE_ACTIVITY_TASK_FAILED:
             a = e.activity_task_failed_event_attributes
             out.append({**base, "kind": "activity_failed",
                         "activity": sched.get(a.scheduled_event_id, "?"),
                         "error": a.failure.message or "unknown"})
-
         elif et == EventType.EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED:
             a = e.workflow_execution_signaled_event_attributes
             out.append({**base, "kind": "signal",
                         "signal": a.signal_name,
                         "input": _decode_payloads(a.input.payloads)})
-
         elif et == EventType.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED:
             a = e.workflow_execution_completed_event_attributes
             output = _decode_payloads(a.result.payloads)
@@ -268,7 +230,6 @@ def _parse_history_events(history_events, source: str) -> list[dict]:
             if intent:
                 event["intent"] = intent
             out.append(event)
-
         elif et == EventType.EVENT_TYPE_WORKFLOW_EXECUTION_FAILED:
             a = e.workflow_execution_failed_event_attributes
             out.append({**base, "kind": "workflow_failed",

@@ -9,28 +9,10 @@
 **Základný princíp:** Claude je stateless — stav drží Temporal. Temporal orchestruje workflows, nie Claude.
 
 **Flow:**
-1. Manažér dostane inštrukciu → LLM resolvne na štruktúrovaný JSON `{project, prompt}`
-2. Temporal zavolá ProjectWorkflow pre daný projekt
-3. ProjectWorkflow spustí FeatureWorkflow → `claude_agent_activity` (claude -p / LiteLLM)
-4. Activity vráti štruktúrovaný JSON výstup (blockers, merge conflicts, výsledok)
-5. Temporal if/else routing — ak merge conflict alebo blocker → HITL signal
-6. HITL sa uloží do PostgreSQL pre prioritizáciu (tabuľka `hitl_requests`)
-7. Manager môže queryovať DB cez štruktúrovaný JSON dotaz → Temporal activity → SELECT → výsledok späť
-
-**Prečo nie pure-Claude:** deterministická orchestrácia, auditovateľnosť, HITL prioritizácia, paralelné/sekvenčné workflow podľa projektu.
-
-**Workflow hierarchia:**
-```
-CommandDispatcher
-  ↓
-ProjectWorkflow (zbornik: sekvencia / ginidocs: paralelne)
-  ↓
-FeatureWorkflow (s HITL signálmi)
-  ↓
-claude_agent_activity (Claude cez LiteLLM)
-```
-
----
+1. API dostane request posunie na Intent Resolvera
+2. Intent resolver - IntentResolver a Validation layer - zavola LLM agenta, ocakava format vstupu. V pripade chat posuva konverzaciu naspat k pouzivatelovi, v pripade ak to nie je chat posuva to na CommandDispatchera
+3. Command dispatcher - exekuje workflow, riesi signaly.
+4. workflow pozostava s aktivit
 
 ## Tech Stack
 
@@ -44,27 +26,6 @@ claude_agent_activity (Claude cez LiteLLM)
 - pytest-asyncio, Black, isort, mypy
 
 ---
-
-## Štruktúra projektu
-
-```
-~/temporal-ai-agent/
-├── workflows/          # CommandDispatcher, ProjectWorkflow, FeatureWorkflow, agent_goal
-├── activities/         # claude_agent_activity.py + tool activities
-├── goals/              # Definície projektov (zbornik.py, ginidocs.py)
-├── api/                # FastAPI server
-├── frontend/           # React UI
-├── prompts/            # Generátory promptov pre agenty
-├── shared/             # MCP server konfigurácia
-├── models/             # Pydantic data types
-├── tests/              # Temporal test suite (time-skipping)
-├── start.sh            # Spustí Temporal (Podman) + worker + API + frontend
-└── stop.sh             # Zastaví worker, API, frontend
-```
-
----
-
-## Kľúčové komponenty
 
 **`claude_agent_activity`:** Volá `claude -p` (alebo LiteLLM) ako Temporal Activity s heartbeat, timeout, retry. Výstup je štruktúrovaný JSON.
 
@@ -127,5 +88,4 @@ uv run alembic upgrade head
 - **Claude stateless:** Temporal drží všetok stav — workflow history, signály, timery
 - **Štruktúrovaný JSON output:** Každá activity vracia JSON, nie plain text — Temporal môže robiť if/else routing
 - **Retry threshold = 1:** V debug fáze — zabrání zacykleniu pri rate limit alebo chybe
-- **Sekvenčné vs paralelné:** Zbornik má zdieľané súbory → musí byť sekvenčné. GiniDocs má separátny backend/frontend → môže bežať paralelne
-- **HITL prioritizácia:** Nie všetky human-in-the-loop requesty sú rovnako dôležité — PostgreSQL umožňuje zoradiť podľa priority
+

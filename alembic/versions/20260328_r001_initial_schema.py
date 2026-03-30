@@ -1,4 +1,4 @@
-"""Initial schema: project, hitl, project_requirement, hitl_xref_project_requirement
+"""Initial schema: project, tasks, project_requirement, tasks_xref_project_requirement
 
 Revision ID: r001
 Revises:
@@ -23,7 +23,7 @@ def upgrade() -> None:
         )
     """)
     op.execute("""
-        CREATE TABLE hitl (
+        CREATE TABLE tasks (
             id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             project_id  UUID NOT NULL REFERENCES project(id),
             title       TEXT NOT NULL,
@@ -31,32 +31,34 @@ def upgrade() -> None:
             status      VARCHAR(20) DEFAULT 'pending'
                             CHECK (status IN ('pending', 'in_progress', 'done', 'cancelled')),
             type        VARCHAR(10) DEFAULT 'task'
-                            CHECK (type IN ('task', 'hitl', 'lesson')),
+                            CHECK (type IN ('task', 'hitl')),
             workflow_id TEXT UNIQUE,
             created_at  TIMESTAMPTZ DEFAULT NOW(),
             modified_at TIMESTAMPTZ DEFAULT NOW()
         )
     """)
     op.execute("""
-        CREATE TABLE project_requirement (
+        CREATE TABLE project_requirements (
             id           BIGSERIAL PRIMARY KEY,
             project_id   UUID NOT NULL REFERENCES project(id),
             description  TEXT NOT NULL,
-            workflow_id  TEXT REFERENCES hitl(workflow_id),
+            status       VARCHAR(20) DEFAULT 'todo'
+                             CHECK (status IN ('todo', 'implementing', 'done')),
+            workflow_id  TEXT REFERENCES tasks(workflow_id),
             created_at   TIMESTAMPTZ DEFAULT NOW()
         )
     """)
     op.execute("""
-        CREATE TABLE hitl_xref_project_requirement (
-            hitl_id                UUID NOT NULL REFERENCES hitl(id),
-            project_requirement_id BIGINT NOT NULL REFERENCES project_requirement(id),
-            PRIMARY KEY (hitl_id, project_requirement_id)
+        CREATE TABLE tasks_xref_project_requirements (
+            task_id                  UUID NOT NULL REFERENCES tasks(id),
+            project_requirement_id   BIGINT NOT NULL REFERENCES project_requirements(id),
+            PRIMARY KEY (task_id, project_requirement_id)
         )
     """)
 
 
 def downgrade() -> None:
-    op.execute("DROP TABLE IF EXISTS hitl_xref_project_requirement")
-    op.execute("DROP TABLE IF EXISTS project_requirement")
-    op.execute("DROP TABLE IF EXISTS hitl")
+    op.execute("DROP TABLE IF EXISTS tasks_xref_project_requirements")
+    op.execute("DROP TABLE IF EXISTS project_requirements")
+    op.execute("DROP TABLE IF EXISTS tasks")
     op.execute("DROP TABLE IF EXISTS project")

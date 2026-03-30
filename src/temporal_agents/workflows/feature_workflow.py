@@ -28,7 +28,7 @@ RETRY_ONCE = RetryPolicy(maximum_attempts=1)
 @dataclass
 class FeatureInput:
     project: str
-    user_message: str
+    user_message: str = ""
 
 
 @workflow.defn

@@ -11,7 +11,7 @@ from temporalio import activity
 DB_URL: str = os.environ.get("HITL_DB_URL", "sqlite:////tmp/hitl.db")
 
 # Only these tables are allowed in execute_db_query
-WHITELIST_TABLES = {"hitl"}
+WHITELIST_TABLES = {"tasks", "project_requirements"}
 
 
 def _db_path() -> str:
@@ -25,7 +25,7 @@ def _db_path() -> str:
 
 async def _init_db(db: aiosqlite.Connection) -> None:
     await db.execute("""
-        CREATE TABLE IF NOT EXISTS hitl (
+        CREATE TABLE IF NOT EXISTS tasks (
             id TEXT PRIMARY KEY,
             project TEXT NOT NULL,
             title TEXT NOT NULL,
@@ -33,6 +33,15 @@ async def _init_db(db: aiosqlite.Connection) -> None:
             status TEXT DEFAULT 'pending',
             type TEXT DEFAULT 'task',
             workflow_id TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS project_requirements (
+            id TEXT PRIMARY KEY,
+            project TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            status TEXT DEFAULT 'todo',
             created_at TEXT NOT NULL
         )
     """)
@@ -45,8 +54,16 @@ class Task(BaseModel):
     title: str
     priority: int = 5
     status: Literal['pending', 'in_progress', 'done', 'cancelled'] = 'pending'
-    type: Literal['task', 'hitl', 'lesson'] = 'task'
+    type: Literal['task', 'hitl'] = 'task'
     workflow_id: Optional[str] = None
+    created_at: str
+
+
+class Requirement(BaseModel):
+    id: str
+    project: str
+    description: str
+    status: Literal['todo', 'implementing', 'done'] = 'todo'
     created_at: str
 
 
@@ -71,7 +88,7 @@ async def store_task(
     async with aiosqlite.connect(_db_path()) as db:
         await _init_db(db)
         await db.execute(
-            "INSERT INTO hitl (id, project, title, priority, status, type, workflow_id, created_at) "
+            "INSERT INTO tasks (id, project, title, priority, status, type, workflow_id, created_at) "
             "VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)",
             (str(record_id), project, title, priority, type, workflow_id, now.isoformat())
         )
@@ -88,20 +105,32 @@ async def store_task(
     )
 
 
+async def store_requirement(project: str, description: str = "") -> Requirement:
+    """Save a new project requirement with status=todo."""
+    req_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    async with aiosqlite.connect(_db_path()) as db:
+        await _init_db(db)
+        await db.execute(
+            "INSERT INTO project_requirements (id, project, description, status, created_at) "
+            "VALUES (?, ?, ?, 'todo', ?)",
+            (req_id, project, description, now)
+        )
+        await db.commit()
+    return Requirement(id=req_id, project=project, description=description, status='todo', created_at=now)
+
+
 async def _fetch_tasks(status: Optional[str] = None) -> list[Task]:
-    """Fetch tasks from DB. If status is None, return all tasks."""
     async with aiosqlite.connect(_db_path()) as db:
         await _init_db(db)
         db.row_factory = aiosqlite.Row
         if status:
             cursor = await db.execute(
-                "SELECT * FROM hitl WHERE status = ? ORDER BY priority ASC, project ASC",
+                "SELECT * FROM tasks WHERE status = ? ORDER BY priority ASC, project ASC",
                 (status,)
             )
         else:
-            cursor = await db.execute(
-                "SELECT * FROM hitl ORDER BY priority ASC, project ASC"
-            )
+            cursor = await db.execute("SELECT * FROM tasks ORDER BY priority ASC, project ASC")
         rows = await cursor.fetchall()
     return [
         Task(
@@ -118,19 +147,43 @@ async def _fetch_tasks(status: Optional[str] = None) -> list[Task]:
     ]
 
 
+async def _fetch_requirements(status: Optional[str] = None) -> list[Requirement]:
+    async with aiosqlite.connect(_db_path()) as db:
+        await _init_db(db)
+        db.row_factory = aiosqlite.Row
+        if status:
+            cursor = await db.execute(
+                "SELECT * FROM project_requirements WHERE status = ? ORDER BY created_at DESC",
+                (status,)
+            )
+        else:
+            cursor = await db.execute(
+                "SELECT * FROM project_requirements ORDER BY created_at DESC"
+            )
+        rows = await cursor.fetchall()
+    return [
+        Requirement(
+            id=row['id'],
+            project=row['project'],
+            description=row['description'],
+            status=row['status'],
+            created_at=row['created_at'],
+        )
+        for row in rows
+    ]
+
+
 @activity.defn
 async def list_tasks(status: str = 'pending') -> list[Task]:
-    """Return tasks filtered by status, sorted by priority ASC then project ASC."""
     return await _fetch_tasks(status)
 
 
 @activity.defn
 async def update_task_status(workflow_id: str, status: str) -> None:
-    """Update task status by workflow_id."""
     async with aiosqlite.connect(_db_path()) as db:
         await _init_db(db)
         await db.execute(
-            "UPDATE hitl SET status = ? WHERE workflow_id = ?",
+            "UPDATE tasks SET status = ? WHERE workflow_id = ?",
             (status, workflow_id)
         )
         await db.commit()
@@ -138,7 +191,6 @@ async def update_task_status(workflow_id: str, status: str) -> None:
 
 @activity.defn
 async def execute_db_query(query: DBQuery) -> list[dict]:
-    """Execute a parameterized SELECT against a whitelisted table."""
     if query.table not in WHITELIST_TABLES:
         raise ValueError(f"Table '{query.table}' is not allowed. Allowed: {WHITELIST_TABLES}")
 

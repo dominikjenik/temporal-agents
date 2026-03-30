@@ -1,13 +1,27 @@
-"""IntentParser — plain Python LLM-based intent + project parser with clarification support."""
+"""IntentResolver + Validation layer.
+
+Public API: resolve(message, client) — full pipeline.
+  1. Call LLM agent, expect ParsedIntent JSON.
+  2. Validate the response.
+  3. chat   → return {"type": "chat"}
+  4. not chat → dispatch to CommandDispatcher → return {"type": "dispatched", "workflow_id": ...}
+  5. invalid  → return {"type": "clarification", "message": ...}
+"""
 import asyncio
 import json
+from typing import Union
+
+from temporalio.client import Client
 
 from temporal_agents.activities.base import _build_cmd, load_agent_model, load_agent_prompt
-from temporal_agents.intent_config import INTENTS, PROJECTS
+from temporal_agents.command_dispatcher import dispatch_command
+from temporal_agents.intent_config import (
+    Intent, Project, Planning, ParsedIntent,
+    INTENTS, PROJECTS, PLANNINGS, PROJECT_OPTIONAL_INTENTS,
+)
 
 
 def _strip_fences(raw: str) -> str:
-    """Remove markdown code fences if the model wraps output despite instructions."""
     raw = raw.strip()
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[-1]
@@ -17,32 +31,37 @@ def _strip_fences(raw: str) -> str:
 
 
 def _validate(raw: str) -> tuple[bool, dict]:
-    """Returns (is_valid, parsed_dict). Valid = intent in INTENTS and project in PROJECTS."""
     try:
         data = json.loads(raw)
-        ok = data.get("intent") in INTENTS and data.get("project") in PROJECTS
-        return ok, data
+        intent = data.get("intent")
+        if intent not in INTENTS:
+            return False, data
+        if Intent(intent) in PROJECT_OPTIONAL_INTENTS:
+            return True, data
+        if data.get("project") not in PROJECTS:
+            return False, data
+        if data.get("planning") not in PLANNINGS:
+            return False, data
+        return True, data
     except (json.JSONDecodeError, TypeError):
         return False, {}
 
 
 def _clarification_message(data: dict) -> str:
-    """Generate clarification question based on what's missing."""
     missing = []
-    if data.get("intent") not in INTENTS:
+    intent = data.get("intent")
+    if intent not in INTENTS:
         missing.append(f"zámer (možnosti: {', '.join(INTENTS)})")
-    if data.get("project") not in PROJECTS:
-        missing.append(f"projekt (možnosti: {', '.join(PROJECTS)})")
+    elif Intent(intent) not in PROJECT_OPTIONAL_INTENTS:
+        if data.get("project") not in PROJECTS:
+            missing.append(f"projekt (možnosti: {', '.join(PROJECTS)})")
+        if data.get("planning") not in PLANNINGS:
+            missing.append(f"plán (možnosti: {', '.join(PLANNINGS)})")
     return f"Nepodarilo sa určiť {' a '.join(missing)}. Môžeš to upresniť?"
 
 
-async def parse(message: str) -> dict:
-    """Call LLM intent_parser agent and return parsed intent.
-
-    Returns:
-        {"intent": str, "project": str}  — on success
-        {"clarification": str}            — when intent or project is unclear
-    """
+async def _llm_resolve_and_parse(message: str) -> Union[ParsedIntent, dict]:
+    """Call LLM and return ParsedIntent or {"clarification": str}."""
     system_prompt = load_agent_prompt("intent_parser")
     model = load_agent_model("intent_parser")
     cmd = _build_cmd(message, system_prompt, model)
@@ -60,6 +79,34 @@ async def parse(message: str) -> dict:
 
     raw = _strip_fences(stdout.decode())
     valid, data = _validate(raw)
-    if valid:
-        return {"intent": data["intent"], "project": data["project"]}
-    return {"clarification": _clarification_message(data)}
+    if not valid:
+        return {"clarification": _clarification_message(data)}
+
+    intent = Intent(data["intent"])
+    if intent == Intent.chat:
+        return ParsedIntent(intent=intent)
+
+    return ParsedIntent(
+        intent=intent,
+        project=Project(data["project"]),
+        planning=Planning(data["planning"]),
+    )
+
+
+async def intent_parser_resolve(message: str, client: Client) -> dict:
+    """Full pipeline: parse → route → dispatch if needed.
+
+    Returns one of:
+      {"type": "chat"}
+      {"type": "dispatched", "workflow_id": str}
+      {"type": "clarification", "message": str}
+    """
+    result = await _llm_resolve_and_parse(message)
+
+    if isinstance(result, dict):
+        return {"type": "clarification", "message": result["clarification"]}
+
+    if result.intent == Intent.chat:
+        return {"type": "chat"}
+
+    return await dispatch_command(result, client)
