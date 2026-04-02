@@ -148,6 +148,108 @@ CREATE TABLE conversations (
 CREATE INDEX ON conversations (user_id, created_at);
 ```
 
-### 7a. Content v conversations — čo tam patrí - OPEN
+### 7a. Content v conversations — čo tam patrí - DONE
 
 **Q:** Čo má byť v stĺpci `content`?
+
+**A:**
+- Raw text správy — to čo vidí používateľ a čo odpovie agent.
+- Tool calls NEPATRIA do `content` — tie sú v Temporal workflow history.
+- Príklad: `"user": "Ahoj, chcem nový button"`, `"assistant": "Rozumiem, vytvorím ho."`
+
+---
+
+## 8. Implementačný plán r003
+
+### 8.1. DB migrácia r003
+
+```python
+# alembic/versions/YYYYMMDD_r003_conversations_and_repos.py
+
+def upgrade() -> None:
+    # Pridanie stĺpcov do project
+    op.execute("""
+        ALTER TABLE project
+            ADD COLUMN repos    JSONB NOT NULL DEFAULT '[]',
+            ADD COLUMN env_file TEXT  NOT NULL DEFAULT ''
+    """)
+
+    # conversations tabuľka
+    op.execute("""
+        CREATE TABLE conversations (
+            id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id    TEXT NOT NULL,
+            task_id    UUID REFERENCES tasks(id),
+            role       VARCHAR(20) NOT NULL CHECK (role IN ('user', 'assistant')),
+            content    TEXT NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    op.execute("CREATE INDEX ON conversations (user_id, created_at)")
+```
+
+### 8.2. API vrstva
+
+| Súbor | Zmena |
+|-------|-------|
+| `api/main.py` | Nové endpointy `/conversations`, `/conversations/{user_id}` |
+| `api/models.py` | `Conversation` Pydantic model |
+| `api/service.py` | CRUD pre conversations |
+
+### 8.3. IntentParser rozšírenie
+
+```python
+# src/temporal_agents/intent_config.py
+@dataclass
+class ParsedIntent:
+    intent: Intent
+    project: str | None
+    component: str | None  # nové: "backend" | "frontend" | None
+    planning: Planning | None
+```
+
+### 8.4. Konverzačný trimming
+
+- Načítavame posledných **50 správ** do LLM contextu (konfigurovateľné).
+- Všetko ostáva v DB — žiadny hard delete.
+
+### 8.5. Súborová štruktúra (nové súbory)
+
+```
+src/temporal_agents/
+├── models/
+│   ├── conversation.py    # Conversation SQLAlchemy model
+│   └── project_ext.py     # Repos, env_file na project
+├── services/
+│   └── conversation.py    # CRUD + trimming
+api/
+├── endpoints/
+│   └── conversations.py   # FastAPI router
+```
+
+### 8.6. Testy
+
+```bash
+# Unit testy (bez Temporal servera)
+uv run pytest tests/unit/test_conversation.py -v
+uv run pytest tests/unit/test_intent_parser.py -v
+```
+
+### 8.7. Poradie implementácie
+
+1. **DB migrácia r003** — základ
+2. **Conversation CRUD** — service + endpoints
+3. **API layer** — pass repos context + component extraction
+4. **IntentParser** — component field
+5. **Trimming logic** — posledných N správ
+6. **FeatureWorkflow** — conversation_id nullable FK
+7. **Testy**
+
+---
+
+## 9. Konfiguračné konštanty
+
+```python
+# src/temporal_agents/config.py
+CONVERSATION_TRIM_MESSAGES: int = 50  # posledných N správ do contextu
+```
