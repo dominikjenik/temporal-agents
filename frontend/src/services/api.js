@@ -48,15 +48,25 @@ async function fetchWithTimeout(url, options = {}, timeout = REQUEST_TIMEOUT_MS)
 }
 
 export const apiService = {
-    // Chat (IntentParser)
+    // Single endpoint for all requests - resolves intent or chat
 
-    async getConversationHistory() {
+    async sendRequest(message) {
+        if (!message?.trim()) {
+            throw new ApiError('Message cannot be empty', 400);
+        }
         try {
-            const res = await fetchWithTimeout(`${API_BASE_URL}/chat/history`);
+            const res = await fetchWithTimeout(
+                `${API_BASE_URL}/request`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message })
+                }
+            );
             return handleResponse(res);
         } catch (error) {
             if (error instanceof ApiError) throw error;
-            throw new ApiError('Failed to fetch conversation history', error.status || 500);
+            throw new ApiError('Failed to send request', error.status || 500);
         }
     },
 

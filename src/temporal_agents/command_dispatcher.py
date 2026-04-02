@@ -3,6 +3,7 @@
 Receives all non-chat ParsedIntent objects from IntentResolver.
 Raw user messages and chat history must never reach this module.
 """
+
 import time
 
 from temporalio.client import Client
@@ -18,19 +19,25 @@ async def dispatch_command(parsed: ParsedIntent, client: Client) -> dict:
     """Execute the appropriate action and return a result dict.
 
     Returns:
-        {"type": "dispatched",  "workflow_id": str}   — Temporal workflow started
-        {"type": "todo_saved",  "requirement_id": str} — requirement saved to DB
+        {"type": "dispatched",  "workflow_id": str, "intent": str, "project": str}
+        {"type": "todo_saved",  "requirement_id": str, "project": str}
 
     Raises:
         ValueError: intent=chat must not be dispatched.
     """
     if parsed.intent == Intent.chat:
-        raise ValueError("Intent.chat must not be dispatched — return it to the user.")
+        raise ValueError(
+            f"Intent.{parsed.intent} must not be dispatched — return it to the user."
+        )
 
     if parsed.intent == Intent.new_feature:
         if parsed.planning == Planning.todo:
             req = await store_requirement(project=parsed.project or "")
-            return {"type": "todo_saved", "requirement_id": req.id, "project": req.project}
+            return {
+                "type": "todo_saved",
+                "requirement_id": req.id,
+                "project": req.project,
+            }
 
         if parsed.planning == Planning.implementing:
             workflow_id = f"{parsed.intent}-{parsed.project}-{int(time.time() * 1000)}"
@@ -40,6 +47,13 @@ async def dispatch_command(parsed: ParsedIntent, client: Client) -> dict:
                 id=workflow_id,
                 task_queue=TASK_QUEUE,
             )
-            return {"type": "dispatched", "workflow_id": workflow_id}
+            return {
+                "type": "dispatched",
+                "workflow_id": workflow_id,
+                "intent": parsed.intent.value,
+                "project": parsed.project.value if parsed.project else "",
+            }
 
-    raise ValueError(f"No action defined for intent='{parsed.intent}', planning='{parsed.planning}'.")
+    raise ValueError(
+        f"No action defined for intent='{parsed.intent}', planning='{parsed.planning}'."
+    )

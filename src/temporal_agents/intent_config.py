@@ -29,4 +29,3 @@ class ParsedIntent:
 INTENTS = [i.value for i in Intent]
 PROJECTS = [p.value for p in Project]
 PLANNINGS = [p.value for p in Planning]
-PROJECT_OPTIONAL_INTENTS = {Intent.chat}
