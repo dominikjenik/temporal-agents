@@ -10,7 +10,7 @@ from temporalio.client import Client
 from temporalio.exceptions import TemporalError
 
 from temporal_agents.activities.hitl_db import _fetch_tasks, _fetch_requirements
-from temporal_agents.intent_parser import intent_parser_resolve, _llm_resolve_and_parse
+from temporal_agents.intent_parser import intent_parser_resolve
 from temporal_agents.intent_config import ParsedIntent
 
 app = FastAPI()
@@ -62,94 +62,6 @@ async def handle_request(body: RequestBody):
         raise HTTPException(status_code=501, detail=str(e))
     except TemporalError as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-# ---------------------------------------------------------------------------
-# Intent parsing endpoint (frontend compatibility)
-# ---------------------------------------------------------------------------
-
-
-class IntentParseBody(BaseModel):
-    message: str
-
-
-@app.post("/intent/parse")
-async def parse_intent(body: IntentParseBody):
-    result = await _llm_resolve_and_parse(body.message)
-    if isinstance(result, dict):
-        return {"clarification": result.get("clarification", "Neznámy výsledok")}
-    return {
-        "intent": result.intent.value,
-        "project": result.project.value if result.project else None,
-        "planning": result.planning.value if result.planning else None,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Chat/Query handling endpoint
-# ---------------------------------------------------------------------------
-
-
-class ChatRequest(BaseModel):
-    message: str
-
-
-@app.post("/chat/prompt")
-async def chat_prompt(body: ChatRequest):
-    from temporal_agents.activities.base import (
-        _build_cmd,
-        load_agent_model,
-        load_agent_prompt,
-    )
-    import asyncio
-
-    system_prompt = "You are a helpful assistant. Answer the user's question helpfully and concisely."
-    model = load_agent_model("intent_parser")
-    cmd = _build_cmd(body.message, system_prompt, model)
-
-    process = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    try:
-        stdout, _ = await asyncio.wait_for(process.communicate(), timeout=120)
-    except asyncio.TimeoutError:
-        process.kill()
-        return {"response": "Vypršal časový limit. Skús to znova."}
-
-    response = stdout.decode().strip()
-    if response.startswith("```"):
-        response = response.split("\n", 1)[-1]
-        if response.endswith("```"):
-            response = response[: response.rfind("```")]
-    return {"response": response.strip()}
-
-
-# ---------------------------------------------------------------------------
-# Manager workflow start endpoint (frontend compatibility)
-# ---------------------------------------------------------------------------
-
-
-class ManagerStartBody(BaseModel):
-    intent: str
-    project: str
-    user_message: str
-
-
-@app.post("/manager/start")
-async def manager_start(body: ManagerStartBody):
-    from temporal_agents.intent_config import Intent, Project, Planning
-    from temporal_agents.command_dispatcher import dispatch_command
-
-    parsed = ParsedIntent(
-        intent=Intent(body.intent),
-        project=Project(body.project),
-        planning=Planning.todo
-        if body.intent == "new_feature"
-        else Planning.implementing,
-    )
-    return await dispatch_command(parsed, temporal_client)
 
 
 # ---------------------------------------------------------------------------
