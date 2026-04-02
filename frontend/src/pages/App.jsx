@@ -363,12 +363,7 @@ export default function App() {
         setLoading(true);
         try {
             const result = await apiService.sendRequest(trimmed);
-            if (result.type === 'clarification') {
-                addMessage(result.message, 'agent');
-                setLoading(false);
-                return;
-            }
-            if (result.type === 'chat' || result.type === 'query') {
+            if (result.type === 'chat') {
                 addMessage(result.response, 'agent');
                 setLoading(false);
                 return;
