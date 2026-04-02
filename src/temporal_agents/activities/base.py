@@ -12,6 +12,7 @@ _AGENTS_DIR = Path(__file__).parents[3] / "agents"
 # Runner: "claude" or "cline" — set via TEMPORAL_RUNNER env var or .env file
 TEMPORAL_RUNNER: str = os.environ.get("TEMPORAL_RUNNER", "claude")
 
+
 def _parse_frontmatter(text: str) -> tuple[dict, str]:
     """Parse simple key: value frontmatter delimited by ---. Returns (meta, body)."""
     if not text.startswith("---"):
@@ -24,7 +25,7 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
         if ":" in line:
             k, _, v = line.partition(":")
             meta[k.strip()] = v.strip()
-    return meta, text[end + 4:].strip()
+    return meta, text[end + 4 :].strip()
 
 
 def load_agent_model(agent_name: str) -> str:
@@ -59,16 +60,23 @@ def load_agent_prompt(agent_name: str) -> str:
 def _build_cmd(task: str, system_prompt: str, model: str = "") -> list[str]:
     """Build CLI command for the configured runner."""
     runner = TEMPORAL_RUNNER
-    if runner == "cline":
-        # Cline has no --system-prompt flag — prepend to task
+    if runner == "opencode":
+        cmd = ["opencode", "run"]
+        if model:
+            cmd += ["--model", model]
+        cmd += ["--format", "json", "--prompt", system_prompt, task]
+        return cmd
+    elif runner == "cline":
         full_task = f"<instructions>\n{system_prompt}\n</instructions>\n\n{task}"
         return ["cline", "task", "-a", "-y", "--json", full_task]
     else:
         cmd = [
             "claude",
             "--dangerously-skip-permissions",
-            "-p", task,
-            "--system-prompt", system_prompt,
+            "-p",
+            task,
+            "--system-prompt",
+            system_prompt,
         ]
         if model:
             cmd += ["--model", model]
@@ -115,7 +123,7 @@ async def run_claude_activity(input: ClaudeActivityInput) -> ClaudeActivityOutpu
     return ClaudeActivityOutput(
         result=result,
         success=(process.returncode == 0),
-        exit_code=process.returncode,
+        exit_code=process.returncode or 0,
     )
 
 
