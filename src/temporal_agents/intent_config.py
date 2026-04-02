@@ -6,6 +6,7 @@ from typing import Optional
 class Intent(StrEnum):
     new_feature = "new_feature"
     chat = "chat"
+    query = "query"
 
 
 class Project(StrEnum):
@@ -29,4 +30,4 @@ class ParsedIntent:
 INTENTS = [i.value for i in Intent]
 PROJECTS = [p.value for p in Project]
 PLANNINGS = [p.value for p in Planning]
-PROJECT_OPTIONAL_INTENTS = {Intent.chat}
+PROJECT_OPTIONAL_INTENTS = {Intent.chat, Intent.query}

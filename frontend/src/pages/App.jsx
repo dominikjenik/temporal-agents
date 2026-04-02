@@ -362,14 +362,28 @@ export default function App() {
         addMessage(trimmed, 'user');
         setLoading(true);
         try {
-            const parsed = await apiService.parseIntent(trimmed);
-            if (parsed.clarification) {
-                addMessage(parsed.clarification, 'agent');
+            const result = await apiService.sendRequest(trimmed);
+            if (result.type === 'clarification') {
+                addMessage(result.message, 'agent');
                 setLoading(false);
                 return;
             }
-            const { workflow_id } = await apiService.startManager(parsed.intent, parsed.project, trimmed);
-            startPolling(workflow_id, parsed.intent, parsed.project);
+            if (result.type === 'chat' || result.type === 'query') {
+                addMessage(result.response, 'agent');
+                setLoading(false);
+                return;
+            }
+            if (result.type === 'dispatched') {
+                startPolling(result.workflow_id, result.intent, result.project);
+                return;
+            }
+            if (result.type === 'todo_saved') {
+                addMessage(`Uložené do todo: ${result.project}`, 'agent');
+                setLoading(false);
+                return;
+            }
+            addMessage(`Neznámy response: ${JSON.stringify(result)}`, 'error');
+            setLoading(false);
         } catch (err) {
             addMessage(`Chyba: ${err.message}`, 'error');
             setLoading(false);

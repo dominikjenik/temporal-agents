@@ -5,6 +5,7 @@ Run only with --llm flag:
 
 dispatch_command is mocked — no Temporal server required.
 """
+
 import pytest
 from unittest.mock import AsyncMock, patch
 
@@ -49,3 +50,25 @@ async def test_chcel_by_som_pridat_button(http_client):
 
     assert response.status_code == 200
     assert response.json()["type"] == "clarification"
+
+
+@pytest.mark.llm
+async def test_aky_agent_bezi_v_pozadi(http_client):
+    """POST /request 'aky agent bezi v pozadi' → query, never dispatched."""
+    response = await http_client.post(
+        "/request", json={"message": "aky agent bezi v pozadi"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["type"] == "query"
+
+
+@pytest.mark.llm
+async def test_aky_workflowy_bezia(http_client):
+    """POST /request 'aky workflowy aktualne bezia' → query."""
+    response = await http_client.post(
+        "/request", json={"message": "aky workflowy aktualne bezia"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["type"] == "query"

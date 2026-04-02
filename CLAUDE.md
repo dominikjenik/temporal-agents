@@ -19,7 +19,7 @@
 - Python 3.11+, uv
 - Temporal Python SDK (`temporalio`)
 - FastAPI + uvicorn (API server port 8001)
-- React + Vite (frontend port 5173)
+- React + Vite (frontend port 8003)
 - LiteLLM (abstrakcia pre LLM volania)
 - PostgreSQL (`hitl_requests`, perzistentný stav)
 - Podman / Docker Compose (Temporal server + PostgreSQL + UI)
@@ -27,7 +27,7 @@
 
 ---
 
-**`claude_agent_activity`:** Volá `claude -p` (alebo LiteLLM) ako Temporal Activity s heartbeat, timeout, retry. Výstup je štruktúrovaný JSON.
+**`claude_agent_activity`:** Volá LLM agenta ako Temporal Activity s heartbeat, timeout, retry. Výstup je štruktúrovaný JSON.
 
 **HITL signály:** `confirm` / `cancel` — workflow čaká na ľudský vstup pred pokračovaním.
 
@@ -75,7 +75,7 @@ uv run pytest tests/integration/
 # http://localhost:8001
 
 # Frontend
-# http://localhost:5173
+# http://localhost:8003
 
 # Alembic migrácia (vyžaduje bežiaci PostgreSQL)
 uv run alembic upgrade head

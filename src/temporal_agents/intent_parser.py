@@ -7,17 +7,28 @@ Public API: resolve(message, client) — full pipeline.
   4. not chat → dispatch to CommandDispatcher → return {"type": "dispatched", "workflow_id": ...}
   5. invalid  → return {"type": "clarification", "message": ...}
 """
+
 import asyncio
 import json
 from typing import Union
 
 from temporalio.client import Client
 
-from temporal_agents.activities.base import _build_cmd, load_agent_model, load_agent_prompt
+from temporal_agents.activities.base import (
+    _build_cmd,
+    load_agent_model,
+    load_agent_prompt,
+)
 from temporal_agents.command_dispatcher import dispatch_command
 from temporal_agents.intent_config import (
-    Intent, Project, Planning, ParsedIntent,
-    INTENTS, PROJECTS, PLANNINGS, PROJECT_OPTIONAL_INTENTS,
+    Intent,
+    Project,
+    Planning,
+    ParsedIntent,
+    INTENTS,
+    PROJECTS,
+    PLANNINGS,
+    PROJECT_OPTIONAL_INTENTS,
 )
 
 
@@ -83,7 +94,7 @@ async def _llm_resolve_and_parse(message: str) -> Union[ParsedIntent, dict]:
         return {"clarification": _clarification_message(data)}
 
     intent = Intent(data["intent"])
-    if intent == Intent.chat:
+    if intent == Intent.chat or intent == Intent.query:
         return ParsedIntent(intent=intent)
 
     return ParsedIntent(
@@ -97,8 +108,10 @@ async def intent_parser_resolve(message: str, client: Client) -> dict:
     """Full pipeline: parse → route → dispatch if needed.
 
     Returns one of:
-      {"type": "chat"}
-      {"type": "dispatched", "workflow_id": str}
+      {"type": "chat", "response": str}
+      {"type": "query", "response": str}
+      {"type": "dispatched", "workflow_id": str, "intent": str, "project": str}
+      {"type": "todo_saved", "requirement_id": str, "project": str}
       {"type": "clarification", "message": str}
     """
     result = await _llm_resolve_and_parse(message)
@@ -106,7 +119,35 @@ async def intent_parser_resolve(message: str, client: Client) -> dict:
     if isinstance(result, dict):
         return {"type": "clarification", "message": result["clarification"]}
 
-    if result.intent == Intent.chat:
-        return {"type": "chat"}
+    if result.intent == Intent.chat or result.intent == Intent.query:
+        response = await _llm_chat_response(message)
+        return {"type": result.intent.value, "response": response}
 
     return await dispatch_command(result, client)
+
+
+async def _llm_chat_response(message: str) -> str:
+    """Get chat response from LLM."""
+    from temporal_agents.activities.base import _build_cmd, load_agent_model
+
+    system_prompt = "You are a helpful assistant. Answer the user's question helpfully and concisely."
+    model = load_agent_model("intent_parser")
+    cmd = _build_cmd(message, system_prompt, model)
+
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, _ = await asyncio.wait_for(process.communicate(), timeout=120)
+    except asyncio.TimeoutError:
+        process.kill()
+        return "Vypršal časový limit. Skús to znova."
+
+    response = stdout.decode().strip()
+    if response.startswith("```"):
+        response = response.split("\n", 1)[-1]
+        if response.endswith("```"):
+            response = response[: response.rfind("```")]
+    return response.strip()

@@ -61,10 +61,8 @@ def _build_cmd(task: str, system_prompt: str, model: str = "") -> list[str]:
     """Build CLI command for the configured runner."""
     runner = TEMPORAL_RUNNER
     if runner == "opencode":
-        cmd = ["opencode", "run"]
-        if model:
-            cmd += ["--model", model]
-        cmd += ["--format", "json", "--prompt", system_prompt, task]
+        full_task = f"{system_prompt}\n\n{task}"
+        cmd = ["opencode", "run", full_task]
         return cmd
     elif runner == "cline":
         full_task = f"<instructions>\n{system_prompt}\n</instructions>\n\n{task}"
