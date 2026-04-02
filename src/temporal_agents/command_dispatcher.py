@@ -23,9 +23,9 @@ async def dispatch_command(parsed: ParsedIntent, client: Client) -> dict:
         {"type": "todo_saved",  "requirement_id": str, "project": str}
 
     Raises:
-        ValueError: intent=chat or intent=query must not be dispatched.
+        ValueError: intent=chat must not be dispatched.
     """
-    if parsed.intent == Intent.chat or parsed.intent == Intent.query:
+    if parsed.intent == Intent.chat:
         raise ValueError(
             f"Intent.{parsed.intent} must not be dispatched — return it to the user."
         )
