@@ -9,10 +9,30 @@
 **Základný princíp:** Claude je stateless — stav drží Temporal. Temporal orchestruje workflows, nie Claude.
 
 **Flow:**
-1. API dostane request posunie na Intent Resolvera
+1. API routes dostane request posunie na Intent Resolvera
 2. Intent resolver - IntentResolver a Validation layer - zavola LLM agenta, ocakava format vstupu. V pripade chat posuva konverzaciu naspat k pouzivatelovi, v pripade ak to nie je chat posuva to na CommandDispatchera
 3. Command dispatcher - exekuje workflow, riesi signaly.
 4. workflow pozostava s aktivit
+5. servisna vrstva sa stara o ukladanie entit v transakciach
+priklad: 1-2-3-4 alebo 1-2-3-5 
+
+### Services (activities/)
+
+| Súbor | Zodpovednosť |
+|-------|--------------|
+| `tasks.py` | Task management — `store_task`, `list_tasks`, `update_task_status`, `create_task`, `complete_task`, `execute_db_query` |
+| `tickets.py` | Ticket management — `store_ticket`, `create_ticket`, `list_tickets` |
+| `conversations.py` | Konverzačný kontext — `store_message`, `get_conversation_history`, `add_user_message`, `add_assistant_message` |
+| `projects.py` | Project config — `store_project`, `get_project`, `list_projects`, `get_project_repos`, `get_project_env_file` |
+
+### DB Tabuľky (SQLite)
+
+| Tabuľka | Účel |
+|---------|------|
+| `tasks` | Work items s workflow_id (HITL tasky, bežné tasky) |
+| `tickets` | Zadania uložené pre budúcu implementáciu (`planning=todo`) |
+| `conversations` | Konverzačná história — `user_id`, `task_id` (nullable), `role`, `content` |
+| `projects` | Projekty — `name`, `priority`, `repos` (JSONB), `env_file` |
 
 ## Tech Stack
 
@@ -31,13 +51,20 @@
 
 **HITL signály:** `confirm` / `cancel` — workflow čaká na ľudský vstup pred pokračovaním.
 
-**HITL v PostgreSQL:** Každý HITL request sa ukladá (`workflow_id`, `description`, `priority`, `status`). Manager môže zobraziť prioritizovaný zoznam.
+**HITL v SQLite:** Každý HITL task a ticket sa ukladá do SQLite (`/tmp/hitl.db`). Manager môže zobraziť prioritizovaný zoznam cez `/tasks` endpoint.
 
-**Manager DB-query vrstva:** Manager generuje `DBQuery(table, filter, order, limit)` → Temporal activity vykoná SELECT → výsledok späť. Whitelist ochrana (len povolené tabuľky).
+**Manager DB-query vrstva:** Manager generuje `DBQuery(table, filter, order, limit)` → Temporal activity vykoná SELECT → výsledok späť. Whitelist ochrana (len `tasks` a `tickets` tabuľky).
 
 **Self-improvement slučka:** Na konci workflow `capture_lesson` activity zapíše lekciu do `lessons/pending.md` → manuálny review → promovanie do agent definícií.
 
 **Retry politiky (debugging):** `maximum_attempts=1` — pri debugovaní nechceme zacykliť na chybách a míňať tokeny.
+
+---
+
+**`/hitl/{workflow_id}/state` endpoint:** Volá `CommandDispatcher.get_hitl_state()` priamo, vracia:
+- `signal_type`: intent z workflow result (napr. "duplicate_suggested", "duplicate_resolved")
+- `response`: payload správy
+- `result`, `comments`, `status`, `log`
 
 ---
 
@@ -88,4 +115,3 @@ uv run alembic upgrade head
 - **Claude stateless:** Temporal drží všetok stav — workflow history, signály, timery
 - **Štruktúrovaný JSON output:** Každá activity vracia JSON, nie plain text — Temporal môže robiť if/else routing
 - **Retry threshold = 1:** V debug fáze — zabrání zacykleniu pri rate limit alebo chybe
-

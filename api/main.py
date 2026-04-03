@@ -9,7 +9,9 @@ from temporalio.api.enums.v1 import EventType, WorkflowExecutionStatus
 from temporalio.client import Client
 from temporalio.exceptions import TemporalError
 
-from temporal_agents.activities.hitl_db import _fetch_tasks, _fetch_requirements
+from temporal_agents.activities.tasks import _fetch_tasks
+from temporal_agents.activities.tickets import _fetch_tickets
+from temporal_agents.command_dispatcher import get_hitl_state
 from temporal_agents.intent_parser import intent_parser_resolve
 from temporal_agents.intent_config import ParsedIntent
 
@@ -52,12 +54,42 @@ def root():
 
 class RequestBody(BaseModel):
     message: str
+    user_id: str = "default"
+    task_id: Optional[str] = None
 
 
 @app.post("/request")
 async def handle_request(body: RequestBody):
     try:
-        return await intent_parser_resolve(body.message, temporal_client)
+        from temporal_agents.activities.conversations import get_conversation_history
+
+        # Get conversation history for context
+        history = await get_conversation_history(
+            user_id=body.user_id, limit=50, task_id=body.task_id
+        )
+
+        # Store user message
+        from temporal_agents.activities.conversations import store_message
+
+        await store_message(body.user_id, "user", body.message, body.task_id)
+
+        # Build context from history
+        context_messages = [{"role": m.role, "content": m.content} for m in history]
+
+        result = await intent_parser_resolve(
+            body.message,
+            temporal_client,
+            user_id=body.user_id,
+            conversation_history=context_messages,
+        )
+
+        # Store assistant response
+        if isinstance(result, dict) and "response" in result:
+            await store_message(
+                body.user_id, "assistant", result["response"], body.task_id
+            )
+
+        return result
     except NotImplementedError as e:
         raise HTTPException(status_code=501, detail=str(e))
     except TemporalError as e:
@@ -97,21 +129,23 @@ async def manager_result(workflow_id: str):
 
 
 # ---------------------------------------------------------------------------
-# Tasks (DB)
+# Tasks & Tickets (DB)
 # ---------------------------------------------------------------------------
 
 
 @app.get("/tasks")
 async def get_tasks():
     tasks = await _fetch_tasks()
-    requirements = await _fetch_requirements()
+    tickets = await _fetch_tickets()
     return [t.model_dump() for t in tasks if t.status != "confirmed"] + [
-        r.model_dump() for r in requirements
+        r.model_dump() for r in tickets
     ]
 
 
 # ---------------------------------------------------------------------------
 # HITL signals + state
+# Uses CommandDispatcher.get_hitl_state() to query workflow directly.
+# Response includes signal_type (intent from workflow) and response (payload message).
 # ---------------------------------------------------------------------------
 
 
@@ -122,43 +156,16 @@ class CommentRequest(BaseModel):
 @app.get("/hitl/{workflow_id}/state")
 async def hitl_state(workflow_id: str):
     try:
-        handle = temporal_client.get_workflow_handle(workflow_id)
-        desc = await handle.describe()
-        _terminal = {
-            WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_COMPLETED,
-            WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_FAILED,
-            WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_TERMINATED,
-            WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_TIMED_OUT,
-            WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_CANCELED,
+        state = await get_hitl_state(workflow_id, temporal_client)
+        return {
+            "signal_type": state.signal_type,
+            "response": state.response,
+            "result": state.result,
+            "comments": state.comments,
+            "status": state.status,
+            "log": state.log,
         }
-        if desc.status in _terminal:
-            is_ok = (
-                desc.status
-                == WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_COMPLETED
-            )
-            try:
-                final_result = await handle.result() if is_ok else None
-            except Exception:
-                final_result = None
-            return {
-                "result": final_result,
-                "comments": [],
-                "status": "confirmed" if is_ok else "failed",
-                "log": [
-                    "Workflow ukončený — požiadavka potvrdená"
-                    if is_ok
-                    else f"Workflow skončil s chybou: {desc.status.name}"
-                ],
-            }
-        result = await handle.query("get_result")
-        comments = await handle.query("get_comments")
-        status = await handle.query("get_status")
-        try:
-            log = await handle.query("get_log")
-        except TemporalError:
-            log = []
-        return {"result": result, "comments": comments, "status": status, "log": log}
-    except TemporalError as e:
+    except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
 
 

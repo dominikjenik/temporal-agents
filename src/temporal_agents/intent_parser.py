@@ -9,7 +9,7 @@ Public API: resolve(message, client) — full pipeline.
 
 import asyncio
 import json
-from typing import Union
+from typing import Optional
 
 from temporalio.client import Client
 
@@ -18,6 +18,7 @@ from temporal_agents.activities.base import (
     load_agent_model,
     load_agent_prompt,
 )
+from temporal_agents.activities.projects import list_projects
 from temporal_agents.command_dispatcher import dispatch_command
 from temporal_agents.intent_config import (
     Intent,
@@ -36,11 +37,43 @@ def _strip_fences(raw: str) -> str:
     return raw.strip()
 
 
-async def _llm_resolve_and_parse(message: str) -> dict:
+async def _build_context_message(
+    message: str,
+    conversation_history: list[dict] = None,
+    project_name: str = None,
+) -> str:
+    """Build full message with conversation context and project repos."""
+    parts = []
+
+    # Add project repos context if available
+    if project_name:
+        from temporal_agents.activities.projects import get_project
+
+        project = await get_project(project_name)
+        if project and project.repos:
+            repos_context = "Dostupné komponenty projektu:\n"
+            for repo in project.repos:
+                repos_context += f"- {repo.title}: {repo.url}\n"
+            parts.append(repos_context)
+
+    # Add conversation history
+    if conversation_history:
+        parts.append("Konverzačná história:\n")
+        for msg in conversation_history:
+            role = "Používateľ" if msg.get("role") == "user" else "Asistent"
+            parts.append(f"{role}: {msg.get('content', '')}")
+
+    parts.append(f"Aktuálna správa: {message}")
+    return "\n\n".join(parts)
+
+
+async def _llm_resolve_and_parse(message: str, context: str = "") -> dict:
     """Call LLM and return action dict."""
     system_prompt = load_agent_prompt("intent_parser")
     model = load_agent_model("intent_parser")
-    cmd = _build_cmd(message, system_prompt, model)
+
+    full_message = f"{context}\n\n{message}" if context else message
+    cmd = _build_cmd(full_message, system_prompt, model)
 
     process = await asyncio.create_subprocess_exec(
         *cmd,
@@ -62,15 +95,29 @@ async def _llm_resolve_and_parse(message: str) -> dict:
         return {"action": "chat", "message": raw}
 
 
-async def intent_parser_resolve(message: str, client: Client) -> dict:
+async def intent_parser_resolve(
+    message: str,
+    client: Client,
+    user_id: str = "default",
+    conversation_history: list[dict] = None,
+    task_id: str = None,
+    project_name: str = None,
+) -> dict:
     """Full pipeline: LLM decides action → execute.
 
     Returns one of:
       {"type": "chat", "response": str}
       {"type": "dispatched", "workflow_id": str, "intent": str, "project": str}
-      {"type": "todo_saved", "requirement_id": str, "project": str}
+      {"type": "todo_saved", "ticket_id": str, "project": str}
     """
-    result = await _llm_resolve_and_parse(message)
+    # Build context from conversation history and project repos
+    context = await _build_context_message(
+        message=message,
+        conversation_history=conversation_history,
+        project_name=project_name,
+    )
+
+    result = await _llm_resolve_and_parse(message, context)
     action = result.get("action")
 
     if action == "dispatch":

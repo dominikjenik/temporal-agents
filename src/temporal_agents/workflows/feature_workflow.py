@@ -5,6 +5,7 @@ Stores the request as a potential duplicate, then waits for human confirm/commen
 Signals:  confirm(), comment(str)
 Queries:  get_status(), get_result(), get_comments(), get_log()
 """
+
 import json
 from dataclasses import dataclass
 from datetime import timedelta
@@ -14,7 +15,7 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
-    from temporal_agents.activities.hitl_db import store_task, update_task_status
+    from temporal_agents.activities.tasks import store_task, update_task_status
 
 _DUPLICATE_PAYLOAD = (
     "Táto požiadavka je pravdepodobne duplikát alebo v konflikte s existujúcimi úlohami. "
@@ -46,7 +47,9 @@ class FeatureWorkflow:
     async def run(self, input: FeatureInput) -> str:
         wf_id = workflow.info().workflow_id
         self._status = "waiting_hitl"
-        self._log.append(f"Požiadavka prijatá [{input.project}]: {input.user_message[:120]}")
+        self._log.append(
+            f"Požiadavka prijatá [{input.project}]: {input.user_message[:120]}"
+        )
         self._log.append("Posúdenie: pravdepodobná duplicita s existujúcimi úlohami")
 
         await workflow.execute_activity(
@@ -65,10 +68,12 @@ class FeatureWorkflow:
                 comment = self._pending_comment
                 self._pending_comment = None
                 self._log.append(f"Komentár prijatý: {comment[:80]}")
-                self._comments.append({
-                    "user": comment,
-                    "bot": "Komentár zaznamenaný. Požiadavku prehodnotím a dám vám vedieť.",
-                })
+                self._comments.append(
+                    {
+                        "user": comment,
+                        "bot": "Komentár zaznamenaný. Požiadavku prehodnotím a dám vám vedieť.",
+                    }
+                )
                 self._log.append("Komentár spracovaný")
 
         self._log.append("Potvrdenie prijaté — workflow sa ukončuje")
@@ -79,7 +84,9 @@ class FeatureWorkflow:
             retry_policy=RETRY_ONCE,
         )
         self._status = "done"
-        return json.dumps({"intent": "duplicate_resolved", "payload": _DUPLICATE_PAYLOAD})
+        return json.dumps(
+            {"intent": "duplicate_resolved", "payload": _DUPLICATE_PAYLOAD}
+        )
 
     # --- Signals ---
 
@@ -100,8 +107,12 @@ class FeatureWorkflow:
     @workflow.query
     def get_result(self) -> str:
         if self._confirmed:
-            return json.dumps({"intent": "duplicate_resolved", "payload": _DUPLICATE_PAYLOAD})
-        return json.dumps({"intent": "duplicate_suggested", "payload": _DUPLICATE_PAYLOAD})
+            return json.dumps(
+                {"intent": "duplicate_resolved", "payload": _DUPLICATE_PAYLOAD}
+            )
+        return json.dumps(
+            {"intent": "duplicate_suggested", "payload": _DUPLICATE_PAYLOAD}
+        )
 
     @workflow.query
     def get_comments(self) -> list:
