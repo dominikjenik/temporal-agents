@@ -115,3 +115,21 @@ uv run alembic upgrade head
 - **Claude stateless:** Temporal drží všetok stav — workflow history, signály, timery
 - **Štruktúrovaný JSON output:** Každá activity vracia JSON, nie plain text — Temporal môže robiť if/else routing
 - **Retry threshold = 1:** V debug fáze — zabrání zacykleniu pri rate limit alebo chybe
+
+---
+
+## TODO — IntentResolver session kontext
+
+IntentResolver je momentálne stateless (každé volanie = 1 LLM call, žiadna história).
+
+Pre chat a clarification scenáre treba udržiavať kontext konverzácie — keď LLM potrebuje doplňujúcu otázku, druhé volanie nemá kontext prvého.
+
+**Implementácia:** Pridať `session_id` parameter do `intent_parser_resolve`, in-memory store `{session_id: [messages]}`, posielať históriu do LLM promptu pri každom volaní.
+
+---
+
+## Referencia — pôvodná session
+
+Session ID: `09215f3f-384b-4001-948d-9ce59e902fb6` (slug: `functional-mixing-oasis`, 2026-03-23/24)
+
+Diskusia o porovnaní AI agent orchestračných frameworkov: LangGraph, CrewAI, AutoGen, Claude Agent SDK, Swarm, Temporal. Temporal zahrnutý ako "durable workflow engine" — infraštrukturálna vrstva pod agentmi. Riešila sa kombinácia Temporal + LangGraph, izolácia agentov cez Temporal aktivity.
