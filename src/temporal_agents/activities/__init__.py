@@ -1,13 +1,19 @@
-from .tasks import execute_db_query, list_tasks, store_task, update_task_status
-from .tickets import create_ticket, list_tickets
+from .tasks import (
+    execute_db_query,
+    list_tasks,
+    store_task,
+    update_task_status,
+    create_task,
+    complete_task,
+)
 from .conversations import (
-    store_message,
-    get_conversation_history,
     add_user_message,
     add_assistant_message,
+    get_conversation,
+    get_conversation_history,
 )
 from .projects import (
-    store_project,
+    save_project,
     get_project,
     list_projects,
     get_project_repos,
@@ -19,13 +25,13 @@ __all__ = [
     "list_tasks",
     "update_task_status",
     "execute_db_query",
-    "create_ticket",
-    "list_tickets",
-    "store_message",
-    "get_conversation_history",
+    "create_task",
+    "complete_task",
     "add_user_message",
     "add_assistant_message",
-    "store_project",
+    "get_conversation",
+    "get_conversation_history",
+    "save_project",
     "get_project",
     "list_projects",
     "get_project_repos",

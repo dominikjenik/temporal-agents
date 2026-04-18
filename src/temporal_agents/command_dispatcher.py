@@ -15,7 +15,8 @@ from typing import Optional
 
 from temporalio.client import Client
 
-from temporal_agents.activities.tickets import store_ticket
+from temporal_agents.activities.tasks import store_task
+from temporalio.client import Client
 from temporal_agents.intent_config import Intent, Planning, ParsedIntent
 from temporal_agents.workflows.feature_workflow import FeatureInput, FeatureWorkflow
 
@@ -87,9 +88,9 @@ async def get_hitl_state(workflow_id: str, client: Client) -> HitlState:
             comments=[],
             status="confirmed" if is_ok else "failed",
             log=[
-                "Workflow ukončený — požiadavka potvrdená"
+                "Workflow completed - request confirmed"
                 if is_ok
-                else f"Workflow skončil s chybou: {desc.status.name}"
+                else f"Workflow finished with error: {desc.status.name}"
             ],
         )
 
@@ -142,11 +143,11 @@ async def dispatch_command(parsed: ParsedIntent, client: Client) -> dict:
 
     if parsed.intent == Intent.new_feature:
         if parsed.planning == Planning.todo:
-            ticket = await store_ticket(project=parsed.project or "")
+            task = await store_task(project=parsed.project or "", title=parsed.project or "")
             return {
                 "type": "todo_saved",
-                "ticket_id": ticket.id,
-                "project": ticket.project,
+                "task_id": task.id,
+                "project": task.project,
             }
 
         if parsed.planning == Planning.implementing:

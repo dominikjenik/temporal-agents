@@ -1,40 +1,36 @@
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, List
 
-import aiosqlite
+import psycopg2
 from pydantic import BaseModel
 from temporalio import activity
 
-DB_URL: str = os.environ.get("HITL_DB_URL", "sqlite:////tmp/hitl.db")
+DB_URL: str = os.environ.get("HITL_DB_URL", "postgresql://temporal:temporal@localhost:5432/temporal")
 
 
-def _db_path() -> str:
-    url = DB_URL
-    if url.startswith("sqlite:///"):
-        return url[len("sqlite:///") :]
-    if url.startswith("sqlite://"):
-        return url[len("sqlite://") :]
-    return url
+def _parse_pg_url(url: str) -> dict:
+    url = url.replace("postgresql://", "").replace("postgres://", "")
+    if "@" in url:
+        auth, rest = url.split("@")
+        user, passwd = auth.split(":")
+    else:
+        user, passwd = "temporal", "temporal"
+    if "/" in rest:
+        host_port, db = rest.split("/")
+        if ":" in host_port:
+            host, port = host_port.split(":")
+            port = int(port)
+        else:
+            host, port = host_port, 5432
+    else:
+        host, port, db = rest, 5432, "temporal"
+    return {"host": host, "port": port, "database": db, "user": user, "password": passwd}
 
 
-async def _init_db(db: aiosqlite.Connection) -> None:
-    await db.execute("""
-        CREATE TABLE IF NOT EXISTS conversations (
-            id TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL,
-            task_id TEXT,
-            role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
-            content TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        )
-    """)
-    await db.execute("""
-        CREATE INDEX IF NOT EXISTS idx_conversations_user_created 
-        ON conversations (user_id, created_at)
-    """)
-    await db.commit()
+def _pg_connect():
+    return psycopg2.connect(**_parse_pg_url(DB_URL))
 
 
 class Conversation(BaseModel):
@@ -52,17 +48,17 @@ async def store_message(
     content: str,
     task_id: Optional[str] = None,
 ) -> Conversation:
-    """Store a single message in the conversation history."""
     record_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
-    async with aiosqlite.connect(_db_path()) as db:
-        await _init_db(db)
-        await db.execute(
-            "INSERT INTO conversations (id, user_id, task_id, role, content, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (record_id, user_id, task_id, role, content, now),
-        )
-        await db.commit()
+    
+    with _pg_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO conversations (id, user_id, task_id, role, content, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s)",
+                (record_id, user_id, task_id, role, content, now),
+            )
+            conn.commit()
     return Conversation(
         id=record_id,
         user_id=user_id,
@@ -78,34 +74,33 @@ async def get_conversation_history(
     limit: int = 50,
     task_id: Optional[str] = None,
 ) -> list[Conversation]:
-    """Get conversation history for a user, optionally filtered by task_id."""
-    async with aiosqlite.connect(_db_path()) as db:
-        await _init_db(db)
-        db.row_factory = aiosqlite.Row
+    
+    with _pg_connect() as conn:
+        with conn.cursor() as cur:
+            if task_id:
+                cur.execute(
+                    "SELECT id, user_id, task_id, role, content, created_at "
+                    "FROM conversations WHERE user_id = %s AND task_id = %s "
+                    "ORDER BY created_at DESC LIMIT %s",
+                    (user_id, task_id, limit),
+                )
+            else:
+                cur.execute(
+                    "SELECT id, user_id, task_id, role, content, created_at "
+                    "FROM conversations WHERE user_id = %s "
+                    "ORDER BY created_at DESC LIMIT %s",
+                    (user_id, limit),
+                )
+            rows = cur.fetchall()
 
-        if task_id:
-            cursor = await db.execute(
-                "SELECT * FROM conversations WHERE user_id = ? AND task_id = ? "
-                "ORDER BY created_at DESC LIMIT ?",
-                (user_id, task_id, limit),
-            )
-        else:
-            cursor = await db.execute(
-                "SELECT * FROM conversations WHERE user_id = ? "
-                "ORDER BY created_at DESC LIMIT ?",
-                (user_id, limit),
-            )
-        rows = await cursor.fetchall()
-
-    # Reverse to get chronological order
     messages = [
         Conversation(
-            id=row["id"],
-            user_id=row["user_id"],
-            task_id=row["task_id"],
-            role=row["role"],
-            content=row["content"],
-            created_at=row["created_at"],
+            id=row[0],
+            user_id=row[1],
+            task_id=row[2],
+            role=row[3],
+            content=row[4],
+            created_at=row[5],
         )
         for row in rows
     ]
@@ -113,25 +108,22 @@ async def get_conversation_history(
 
 
 async def get_user_conversations(user_id: str) -> list[dict]:
-    """Get all conversations for a user, grouped by task_id."""
-    async with aiosqlite.connect(_db_path()) as db:
-        await _init_db(db)
-        db.row_factory = aiosqlite.Row
-
-        cursor = await db.execute(
+    
+    with _pg_connect() as cur:
+        cur.execute(
             "SELECT task_id, COUNT(*) as message_count, MIN(created_at) as first_message, "
-            "MAX(created_at) as last_message FROM conversations WHERE user_id = ? "
+            "MAX(created_at) as last_message FROM conversations WHERE user_id = %s "
             "GROUP BY task_id ORDER BY last_message DESC",
             (user_id,),
         )
-        rows = await cursor.fetchall()
+        rows = cur.fetchall()
 
     return [
         {
-            "task_id": row["task_id"],
-            "message_count": row["message_count"],
-            "first_message": row["first_message"],
-            "last_message": row["last_message"],
+            "task_id": row[0],
+            "message_count": row[1],
+            "first_message": row[2],
+            "last_message": row[3],
         }
         for row in rows
     ]
@@ -141,7 +133,6 @@ async def get_user_conversations(user_id: str) -> list[dict]:
 async def add_user_message(
     user_id: str, content: str, task_id: Optional[str] = None
 ) -> Conversation:
-    """Activity wrapper for storing user message."""
     return await store_message(user_id, "user", content, task_id)
 
 
@@ -149,7 +140,6 @@ async def add_user_message(
 async def add_assistant_message(
     user_id: str, content: str, task_id: Optional[str] = None
 ) -> Conversation:
-    """Activity wrapper for storing assistant message."""
     return await store_message(user_id, "assistant", content, task_id)
 
 
@@ -157,6 +147,5 @@ async def add_assistant_message(
 async def get_conversation(
     user_id: str, limit: int = 50, task_id: Optional[str] = None
 ) -> list[dict]:
-    """Activity wrapper for getting conversation history as list of dicts."""
     messages = await get_conversation_history(user_id, limit, task_id)
     return [{"role": m.role, "content": m.content} for m in messages]

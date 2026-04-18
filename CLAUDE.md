@@ -21,18 +21,16 @@ priklad: 1-2-3-4 alebo 1-2-3-5
 | Súbor | Zodpovednosť |
 |-------|--------------|
 | `tasks.py` | Task management — `store_task`, `list_tasks`, `update_task_status`, `create_task`, `complete_task`, `execute_db_query` |
-| `tickets.py` | Ticket management — `store_ticket`, `create_ticket`, `list_tickets` |
-| `conversations.py` | Konverzačný kontext — `store_message`, `get_conversation_history`, `add_user_message`, `add_assistant_message` |
-| `projects.py` | Project config — `store_project`, `get_project`, `list_projects`, `get_project_repos`, `get_project_env_file` |
+| `conversations.py` | Konverzačný kontext — `add_user_message`, `add_assistant_message`, `get_conversation`, `get_conversation_history` |
+| `projects.py` | Project config — `save_project`, `get_project`, `list_projects`, `get_project_repos`, `get_project_env_file` |
 
-### DB Tabuľky (SQLite)
+### DB Tabuľky (PostgreSQL)
 
 | Tabuľka | Účel |
 |---------|------|
-| `tasks` | Work items s workflow_id (HITL tasky, bežné tasky) |
-| `tickets` | Zadania uložené pre budúcu implementáciu (`planning=todo`) |
+| `tasks` | Work items s workflow_id, status (TODO/BLOCKED/DONE), parent_id, conversations JSON |
 | `conversations` | Konverzačná história — `user_id`, `task_id` (nullable), `role`, `content` |
-| `projects` | Projekty — `name`, `priority`, `repos` (JSONB), `env_file` |
+| `projects` | Projekty — `name`, `priority`, `repos` (JSON), `env_file` |
 
 ## Tech Stack
 
@@ -117,14 +115,6 @@ uv run alembic upgrade head
 - **Retry threshold = 1:** V debug fáze — zabrání zacykleniu pri rate limit alebo chybe
 
 ---
-
-## TODO — IntentResolver session kontext
-
-IntentResolver je momentálne stateless (každé volanie = 1 LLM call, žiadna história).
-
-Pre chat a clarification scenáre treba udržiavať kontext konverzácie — keď LLM potrebuje doplňujúcu otázku, druhé volanie nemá kontext prvého.
-
-**Implementácia:** Pridať `session_id` parameter do `intent_parser_resolve`, in-memory store `{session_id: [messages]}`, posielať históriu do LLM promptu pri každom volaní.
 
 ---
 

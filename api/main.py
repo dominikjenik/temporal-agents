@@ -10,10 +10,8 @@ from temporalio.client import Client
 from temporalio.exceptions import TemporalError
 
 from temporal_agents.activities.tasks import _fetch_tasks
-from temporal_agents.activities.tickets import _fetch_tickets
 from temporal_agents.command_dispatcher import get_hitl_state
 from temporal_agents.intent_parser import intent_parser_resolve
-from temporal_agents.intent_config import ParsedIntent
 
 app = FastAPI()
 temporal_client: Optional[Client] = None
@@ -46,10 +44,9 @@ def root():
     return {"status": "ok"}
 
 
-# ---------------------------------------------------------------------------
-# IntentResolver — full pipeline: parse → validate → route → dispatch
-# API passes message + Temporal client. IntentResolver handles the rest.
-# ---------------------------------------------------------------------------
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 
 class RequestBody(BaseModel):
@@ -61,44 +58,17 @@ class RequestBody(BaseModel):
 @app.post("/request")
 async def handle_request(body: RequestBody):
     try:
-        from temporal_agents.activities.conversations import get_conversation_history
-
-        # Get conversation history for context
-        history = await get_conversation_history(
-            user_id=body.user_id, limit=50, task_id=body.task_id
-        )
-
-        # Store user message
-        from temporal_agents.activities.conversations import store_message
-
-        await store_message(body.user_id, "user", body.message, body.task_id)
-
-        # Build context from history
-        context_messages = [{"role": m.role, "content": m.content} for m in history]
-
         result = await intent_parser_resolve(
             body.message,
             temporal_client,
             user_id=body.user_id,
-            conversation_history=context_messages,
+            conversation_history=[],
         )
-
-        # Store assistant response
-        if isinstance(result, dict) and "response" in result:
-            await store_message(
-                body.user_id, "assistant", result["response"], body.task_id
-            )
-
         return result
     except NotImplementedError as e:
         raise HTTPException(status_code=501, detail=str(e))
     except TemporalError as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-# ---------------------------------------------------------------------------
-# Workflow status + result
-# ---------------------------------------------------------------------------
 
 
 @app.get("/manager/{workflow_id}/status")
@@ -128,25 +98,34 @@ async def manager_result(workflow_id: str):
         return {"result": f"Chyba: {str(e)[:300]}"}
 
 
-# ---------------------------------------------------------------------------
-# Tasks & Tickets (DB)
-# ---------------------------------------------------------------------------
-
-
 @app.get("/tasks")
 async def get_tasks():
+    from temporal_agents.activities.projects import list_projects
+    projects = await list_projects()
     tasks = await _fetch_tasks()
-    tickets = await _fetch_tickets()
-    return [t.model_dump() for t in tasks if t.status != "confirmed"] + [
-        r.model_dump() for r in tickets
-    ]
+    return {
+        "projects": [p.model_dump() for p in projects],
+        "tasks": [t.model_dump() for t in tasks if t.status == "TODO"],
+    }
 
 
-# ---------------------------------------------------------------------------
-# HITL signals + state
-# Uses CommandDispatcher.get_hitl_state() to query workflow directly.
-# Response includes signal_type (intent from workflow) and response (payload message).
-# ---------------------------------------------------------------------------
+class CreateTaskRequest(BaseModel):
+    project: str
+    title: str
+    priority: int = 5
+    parent_id: Optional[str] = None
+
+
+@app.post("/tasks")
+async def create_task(req: CreateTaskRequest):
+    from temporal_agents.activities.tasks import store_task
+    task = await store_task(
+        project=req.project,
+        title=req.title,
+        priority=req.priority,
+        parent_id=req.parent_id,
+    )
+    return task.model_dump()
 
 
 class CommentRequest(BaseModel):

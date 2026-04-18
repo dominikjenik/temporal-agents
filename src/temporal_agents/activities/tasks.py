@@ -1,68 +1,52 @@
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import Literal, Optional
+from typing import Optional, List
+import json
 
-import aiosqlite
+import psycopg2
 from pydantic import BaseModel
 from temporalio import activity
 
-DB_URL: str = os.environ.get("HITL_DB_URL", "sqlite:////tmp/hitl.db")
+DB_URL: str = os.environ.get("HITL_DB_URL", "postgresql://temporal:temporal@localhost:5432/temporal")
 
-WHITELIST_TABLES = {"tasks", "tickets"}
-
-
-def _db_path() -> str:
-    url = DB_URL
-    if url.startswith("sqlite:///"):
-        return url[len("sqlite:///") :]
-    if url.startswith("sqlite://"):
-        return url[len("sqlite://") :]
-    return url
+WHITELIST_TABLES = {"tasks", "projects"}
 
 
-async def _init_db(db: aiosqlite.Connection) -> None:
-    await db.execute("""
-        CREATE TABLE IF NOT EXISTS tasks (
-            id TEXT PRIMARY KEY,
-            project TEXT NOT NULL,
-            title TEXT NOT NULL,
-            priority INTEGER DEFAULT 5,
-            status TEXT DEFAULT 'pending',
-            type TEXT DEFAULT 'task',
-            workflow_id TEXT,
-            created_at TEXT NOT NULL
-        )
-    """)
-    await db.execute("""
-        CREATE TABLE IF NOT EXISTS tickets (
-            id TEXT PRIMARY KEY,
-            project TEXT NOT NULL,
-            description TEXT NOT NULL DEFAULT '',
-            status TEXT DEFAULT 'todo',
-            created_at TEXT NOT NULL
-        )
-    """)
-    await db.commit()
+def _parse_pg_url(url: str) -> dict:
+    url = url.replace("postgresql://", "").replace("postgres://", "")
+    if "@" in url:
+        auth, rest = url.split("@")
+        user, passwd = auth.split(":")
+    else:
+        user, passwd = "temporal", "temporal"
+    if "/" in rest:
+        host_port, db = rest.split("/")
+        if ":" in host_port:
+            host, port = host_port.split(":")
+            port = int(port)
+        else:
+            host, port = host_port, 5432
+    else:
+        host, port, db = rest, 5432, "temporal"
+    return {"host": host, "port": port, "database": db, "user": user, "password": passwd}
+
+
+def _pg_connect():
+    return psycopg2.connect(**_parse_pg_url(DB_URL))
 
 
 class Task(BaseModel):
-    id: uuid.UUID
+    id: str
+    parent_id: Optional[str] = None
     project: str
     title: str
     priority: int = 5
-    status: Literal["pending", "in_progress", "done", "cancelled"] = "pending"
-    type: Literal["task", "hitl"] = "task"
+    status: str = "TODO"
     workflow_id: Optional[str] = None
     created_at: str
-
-
-class Ticket(BaseModel):
-    id: str
-    project: str
-    description: str
-    status: str = "todo"
-    created_at: str
+    modified_at: str
+    conversations: str = "[]"
 
 
 class DBQuery(BaseModel):
@@ -77,110 +61,68 @@ async def store_task(
     project: str,
     title: str,
     priority: int = 5,
-    type: str = "task",
     workflow_id: Optional[str] = None,
+    parent_id: Optional[str] = None,
 ) -> Task:
-    """Insert a new task (or HITL task) and return it."""
-    record_id = uuid.uuid4()
-    now = datetime.now(timezone.utc)
-    async with aiosqlite.connect(_db_path()) as db:
-        await _init_db(db)
-        await db.execute(
-            "INSERT INTO tasks (id, project, title, priority, status, type, workflow_id, created_at) "
-            "VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)",
-            (
-                str(record_id),
-                project,
-                title,
-                priority,
-                type,
-                workflow_id,
-                now.isoformat(),
-            ),
-        )
-        await db.commit()
+    task_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    conversations = "[]"
+
+    
+
+    with _pg_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO tasks (id, parent_id, project, title, priority, status, workflow_id, created_at, modified_at, conversations)
+                   VALUES (%s, %s, %s, %s, %s, 'TODO', %s, %s, %s, %s)""",
+                (task_id, parent_id, project, title, priority, workflow_id, now, now, conversations),
+            )
+        conn.commit()
+
     return Task(
-        id=record_id,
+        id=task_id,
+        parent_id=parent_id,
         project=project,
         title=title,
         priority=priority,
-        status="pending",
-        type=type,
+        status="TODO",
         workflow_id=workflow_id,
-        created_at=now.isoformat(),
-    )
-
-
-@activity.defn
-async def store_ticket(project: str, description: str = "") -> Ticket:
-    """Save a new ticket with status=todo."""
-    ticket_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
-    async with aiosqlite.connect(_db_path()) as db:
-        await _init_db(db)
-        await db.execute(
-            "INSERT INTO tickets (id, project, description, status, created_at) "
-            "VALUES (?, ?, ?, 'todo', ?)",
-            (ticket_id, project, description, now),
-        )
-        await db.commit()
-    return Ticket(
-        id=ticket_id,
-        project=project,
-        description=description,
-        status="todo",
         created_at=now,
+        modified_at=now,
+        conversations=conversations,
     )
 
 
-async def _fetch_tasks(status: Optional[str] = None) -> list[Task]:
-    async with aiosqlite.connect(_db_path()) as db:
-        await _init_db(db)
-        db.row_factory = aiosqlite.Row
-        if status:
-            cursor = await db.execute(
-                "SELECT * FROM tasks WHERE status = ? ORDER BY priority ASC, project ASC",
-                (status,),
-            )
-        else:
-            cursor = await db.execute(
-                "SELECT * FROM tasks ORDER BY priority ASC, project ASC"
-            )
-        rows = await cursor.fetchall()
+async def _fetch_tasks(status: Optional[str] = None) -> List[Task]:
+    
+
+    with _pg_connect() as conn:
+        with conn.cursor() as cur:
+            if status:
+                cur.execute(
+                    "SELECT id, parent_id, project, title, priority, status, workflow_id, created_at, modified_at, conversations "
+                    "FROM tasks WHERE status = %s ORDER BY priority ASC, project ASC",
+                    (status,),
+                )
+            else:
+                cur.execute(
+                    "SELECT id, parent_id, project, title, priority, status, workflow_id, created_at, modified_at, conversations "
+                    "FROM tasks ORDER BY priority ASC, project ASC"
+                )
+            rows = cur.fetchall()
+
     return [
         Task(
-            id=uuid.UUID(row["id"]),
-            project=row["project"],
-            title=row["title"],
-            priority=row["priority"],
-            status=row["status"],
-            type=row["type"],
-            workflow_id=row["workflow_id"],
-            created_at=row["created_at"],
-        )
-        for row in rows
-    ]
-
-
-async def _fetch_tickets(status: Optional[str] = None) -> list[Ticket]:
-    async with aiosqlite.connect(_db_path()) as db:
-        await _init_db(db)
-        db.row_factory = aiosqlite.Row
-        if status:
-            cursor = await db.execute(
-                "SELECT * FROM tickets WHERE status = ? ORDER BY created_at DESC",
-                (status,),
-            )
-        else:
-            cursor = await db.execute("SELECT * FROM tickets ORDER BY created_at DESC")
-        rows = await cursor.fetchall()
-    return [
-        Ticket(
-            id=row["id"],
-            project=row["project"],
-            description=row["description"],
-            status=row["status"],
-            created_at=row["created_at"],
+            id=row[0],
+            parent_id=row[1],
+            project=row[2],
+            title=row[3],
+            priority=row[4],
+            status=row[5],
+            workflow_id=row[6],
+            created_at=row[7],
+            modified_at=row[8],
+            conversations=row[9],
         )
         for row in rows
     ]
@@ -188,22 +130,19 @@ async def _fetch_tickets(status: Optional[str] = None) -> list[Ticket]:
 
 @activity.defn
 async def update_task_status(workflow_id: str, status: str) -> None:
-    async with aiosqlite.connect(_db_path()) as db:
-        await _init_db(db)
-        await db.execute(
-            "UPDATE tasks SET status = ? WHERE workflow_id = ?", (status, workflow_id)
-        )
-        await db.commit()
+    now = datetime.now(timezone.utc).isoformat()
+    with _pg_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE tasks SET status = %s, modified_at = %s WHERE workflow_id = %s",
+                (status, now, workflow_id),
+            )
+        conn.commit()
 
 
 @activity.defn
-async def list_tasks(status: str = "pending") -> list[Task]:
+async def list_tasks(status: str = "TODO") -> List[Task]:
     return await _fetch_tasks(status)
-
-
-@activity.defn
-async def list_tickets(status: str = "todo") -> list[Ticket]:
-    return await _fetch_tickets(status)
 
 
 @activity.defn
@@ -211,50 +150,83 @@ async def create_task(
     project: str,
     title: str,
     priority: int = 5,
-    type: str = "task",
     workflow_id: Optional[str] = None,
+    parent_id: Optional[str] = None,
 ) -> Task:
-    """Activity wrapper for store_task."""
-    return await store_task(project, title, priority, type, workflow_id)
-
-
-@activity.defn
-async def create_ticket(project: str, description: str = "") -> Ticket:
-    """Activity wrapper for store_ticket."""
-    return await store_ticket(project, description)
+    return await store_task(project, title, priority, workflow_id, parent_id)
 
 
 @activity.defn
 async def complete_task(workflow_id: str) -> None:
-    """Activity wrapper for update_task_status with done status."""
-    return await update_task_status(workflow_id, "done")
+    return await update_task_status(workflow_id, "DONE")
+
+
+@activity.defn
+async def add_conversation(task_id: str, role: str, content: str) -> Task:
+    now = datetime.now(timezone.utc).isoformat()
+
+    with _pg_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT conversations FROM tasks WHERE id = %s", (task_id,))
+            row = cur.fetchone()
+            if not row:
+                raise ValueError(f"Task {task_id} not found")
+
+            convs = json.loads(row[0])
+            convs.append({"role": role, "content": content, "created_at": now})
+            convs_json = json.dumps(convs)
+
+            cur.execute(
+                "UPDATE tasks SET conversations = %s, modified_at = %s WHERE id = %s",
+                (convs_json, now, task_id),
+            )
+        conn.commit()
+
+    with _pg_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, parent_id, project, title, priority, status, workflow_id, created_at, modified_at, conversations "
+                "FROM tasks WHERE id = %s",
+                (task_id,),
+            )
+            row = cur.fetchone()
+
+    return Task(
+        id=row[0],
+        parent_id=row[1],
+        project=row[2],
+        title=row[3],
+        priority=row[4],
+        status=row[5],
+        workflow_id=row[6],
+        created_at=row[7],
+        modified_at=row[8],
+        conversations=row[9],
+    )
 
 
 @activity.defn
 async def execute_db_query(query: DBQuery) -> list[dict]:
-    """Execute a read-only DB query with whitelist protection."""
     if query.table not in WHITELIST_TABLES:
-        raise ValueError(
-            f"Table '{query.table}' is not allowed. Allowed: {WHITELIST_TABLES}"
-        )
+        raise ValueError(f"Table '{query.table}' is not allowed. Allowed: {WHITELIST_TABLES}")
 
-    sql = f"SELECT * FROM {query.table}"
-    params = []
+    with _pg_connect() as conn:
+        with conn.cursor() as cur:
+            sql = f"SELECT * FROM {query.table}"
+            params = []
 
-    if query.filter:
-        conditions = [f"{k} = ?" for k in query.filter.keys()]
-        sql += " WHERE " + " AND ".join(conditions)
-        params.extend(query.filter.values())
+            if query.filter:
+                conditions = [f"{k} = %s" for k in query.filter.keys()]
+                sql += " WHERE " + " AND ".join(conditions)
+                params.extend(query.filter.values())
 
-    if query.order:
-        sql += f" ORDER BY {query.order}"
+            if query.order:
+                sql += f" ORDER BY {query.order}"
 
-    sql += f" LIMIT {query.limit}"
+            sql += f" LIMIT {query.limit}"
 
-    async with aiosqlite.connect(_db_path()) as db:
-        await _init_db(db)
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute(sql, params)
-        rows = await cursor.fetchall()
+            cur.execute(sql, params)
+            rows = cur.fetchall()
 
-    return [dict(row) for row in rows]
+            columns = [desc[0] for desc in cur.description] if cur.description else []
+            return [dict(zip(columns, row)) for row in rows]
