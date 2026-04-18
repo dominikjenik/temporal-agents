@@ -22,11 +22,11 @@ done
 echo "==> Starting worker (background)..."
 cd "$SCRIPT_DIR"
 [ -f "$SCRIPT_DIR/.env" ] && set -a && source "$SCRIPT_DIR/.env" && set +a
-PYTHONUNBUFFERED=1 PYTHONPATH="$SCRIPT_DIR/src" uv run python -m temporal_agents.workers.worker > /tmp/temporal-worker.log 2>&1 &
+PYTHONUNBUFFERED=1 PYTHONPATH="$SCRIPT_DIR" uv run python -m temporal_agents.workers.worker > /tmp/temporal-worker.log 2>&1 &
 echo "    Worker PID: $!  | log: /tmp/temporal-worker.log"
 
 echo "==> Starting API (background)..."
-PYTHONPATH="$SCRIPT_DIR/src" uv run python -m uvicorn api.main:app --reload --host 0.0.0.0 --port 8001 > /tmp/temporal-api.log 2>&1 &
+PYTHONUNBUFFERED=1 PYTHONPATH="$SCRIPT_DIR" uv run python -m uvicorn api.main:app --reload --host 0.0.0.0 --port 8001 > /tmp/temporal-api.log 2>&1 &
 echo "    API PID: $!  | log: /tmp/temporal-api.log"
 
 if ! lsof -i :8003 > /dev/null 2>&1; then

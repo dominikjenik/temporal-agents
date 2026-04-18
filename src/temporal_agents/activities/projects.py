@@ -49,6 +49,7 @@ class Project(BaseModel):
     modified_at: str
 
 
+@activity.defn
 async def store_project(
     name: str,
     priority: int = 5,
@@ -105,6 +106,7 @@ async def get_project(name: str) -> Optional[Project]:
     )
 
 
+@activity.defn
 async def list_projects() -> list[Project]:
     """List all projects."""
     async with aiosqlite.connect(_db_path()) as db:

@@ -72,6 +72,7 @@ class DBQuery(BaseModel):
     limit: int = 100
 
 
+@activity.defn
 async def store_task(
     project: str,
     title: str,
@@ -110,6 +111,7 @@ async def store_task(
     )
 
 
+@activity.defn
 async def store_ticket(project: str, description: str = "") -> Ticket:
     """Save a new ticket with status=todo."""
     ticket_id = str(uuid.uuid4())
@@ -184,6 +186,7 @@ async def _fetch_tickets(status: Optional[str] = None) -> list[Ticket]:
     ]
 
 
+@activity.defn
 async def update_task_status(workflow_id: str, status: str) -> None:
     async with aiosqlite.connect(_db_path()) as db:
         await _init_db(db)
