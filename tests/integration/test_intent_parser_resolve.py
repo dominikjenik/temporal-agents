@@ -5,6 +5,7 @@ Run only with --llm flag:
 
 dispatch_command is mocked — no Temporal server required.
 """
+
 import pytest
 from unittest.mock import AsyncMock, patch
 
@@ -33,7 +34,7 @@ async def test_pridaj_dark_mode_zbornik(http_client):
 
 @pytest.mark.llm
 async def test_ake_je_pocasie(http_client):
-    """POST /request 'ake je pocasie?' → chat, never dispatched."""
+    """POST /request 'ake je pocasie?' → chat."""
     response = await http_client.post("/request", json={"message": "ake je pocasie?"})
 
     assert response.status_code == 200
@@ -42,10 +43,23 @@ async def test_ake_je_pocasie(http_client):
 
 @pytest.mark.llm
 async def test_chcel_by_som_pridat_button(http_client):
-    """POST /request 'chcel by som pridat button' → clarification (project unknown)."""
+    """POST /request 'chcel by som pridat button' → chat (LLM asks or responds)."""
     response = await http_client.post(
         "/request", json={"message": "chcel by som pridat button"}
     )
 
     assert response.status_code == 200
-    assert response.json()["type"] == "clarification"
+    data = response.json()
+    assert data["type"] == "chat"
+
+
+@pytest.mark.llm
+async def test_aky_agent_bezi_v_pozadi(http_client):
+    """POST /request 'aky agent bezi v pozadi' → chat (LLM answers)."""
+    response = await http_client.post(
+        "/request", json={"message": "aky agent bezi v pozadi"}
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["type"] == "chat"

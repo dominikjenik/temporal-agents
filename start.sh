@@ -3,6 +3,14 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+echo "==> Loading environment..."
+[ -f "$SCRIPT_DIR/.env" ] && set -a && source "$SCRIPT_DIR/.env" && set +a
+
+# Fallback to PostgreSQL if not set
+export HITL_DB_URL="${HITL_DB_URL:-postgresql://temporal:temporal@localhost:5432/temporal}"
+
+echo "    HITL_DB_URL: $HITL_DB_URL"
+
 echo "==> Starting Temporal server (Podman)..."
 podman compose -f "$SCRIPT_DIR/docker-compose.yml" up -d
 
@@ -19,27 +27,27 @@ for i in $(seq 1 60); do
     sleep 1
 done
 
-echo "==> Starting worker..."
+echo "==> Starting worker (background)..."
 cd "$SCRIPT_DIR"
-[ -f "$SCRIPT_DIR/.env" ] && set -a && source "$SCRIPT_DIR/.env" && set +a
-PYTHONUNBUFFERED=1 PYTHONPATH="$SCRIPT_DIR/src" uv run python -m temporal_agents.workers.worker > /tmp/temporal-worker.log 2>&1 &
+PYTHONUNBUFFERED=1 PYTHONPATH="$SCRIPT_DIR" uv run python -m temporal_agents.workers.worker > /tmp/temporal-worker.log 2>&1 &
 echo "    Worker PID: $!  | log: /tmp/temporal-worker.log"
 
-echo "==> Starting API (port 8001)..."
-PYTHONPATH="$SCRIPT_DIR/src" uv run python -m uvicorn api.main:app --reload --host 0.0.0.0 --port 8001 > /tmp/temporal-api.log 2>&1 &
+echo "==> Starting API (background)..."
+PYTHONUNBUFFERED=1 PYTHONPATH="$SCRIPT_DIR" uv run python -m uvicorn api.main:app --reload --host 0.0.0.0 --port 8001 > /tmp/temporal-api.log 2>&1 &
 echo "    API PID: $!  | log: /tmp/temporal-api.log"
 
-echo "==> Checking frontend (syntax/build)..."
-cd "$SCRIPT_DIR/frontend" && npm run build -- --mode development > /tmp/temporal-fe-build.log 2>&1 \
-    && echo "    Build OK" \
-    || { echo "    BUILD FAILED — check /tmp/temporal-fe-build.log"; exit 1; }
-
-echo "==> Starting frontend (port 8003)..."
-cd "$SCRIPT_DIR/frontend" && npm run dev > /tmp/temporal-fe.log 2>&1 &
-echo "    Frontend PID: $!"
+if ! lsof -i :8003 > /dev/null 2>&1; then
+    echo "==> Building frontend (background)..."
+    cd "$SCRIPT_DIR/frontend" && npm run build -- --mode development > /tmp/temporal-fe-build.log 2>&1 &
+    
+    echo "==> Starting frontend (background)..."
+    cd "$SCRIPT_DIR/frontend" && npm run dev > /tmp/temporal-fe.log 2>&1 &
+    echo "    Frontend PID: $!"
+fi
 
 echo ""
 echo "==> Stack is running:"
 echo "    Frontend    | http://localhost:8003"
 echo "    API         | http://localhost:8001"
 echo "    Temporal UI | http://localhost:8002"
+echo "    PostgreSQL  | localhost:5432/temporal"
