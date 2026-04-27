@@ -37,7 +37,6 @@ class FeatureWorkflow:
     """Project manager HITL handler for new_feature requests."""
 
     def __init__(self) -> None:
-        self._status: str = "pending"
         self._confirmed: bool = False
         self._pending_comment: Optional[str] = None
         self._comments: list = []
@@ -46,7 +45,6 @@ class FeatureWorkflow:
     @workflow.run
     async def run(self, input: FeatureInput) -> str:
         wf_id = workflow.info().workflow_id
-        self._status = "waiting_hitl"
         self._log.append(
             f"Požiadavka prijatá [{input.project}]: {input.user_message[:120]}"
         )
@@ -83,7 +81,6 @@ class FeatureWorkflow:
             start_to_close_timeout=DB_TIMEOUT,
             retry_policy=RETRY_ONCE,
         )
-        self._status = "done"
         return json.dumps(
             {"intent": "duplicate_resolved", "payload": _DUPLICATE_PAYLOAD}
         )
@@ -102,7 +99,11 @@ class FeatureWorkflow:
 
     @workflow.query
     def get_status(self) -> str:
-        return self._status
+        if self._pending_comment is not None:
+            return "hitl_comment"
+        if self._confirmed:
+            return "confirmed"
+        return "hitl"
 
     @workflow.query
     def get_result(self) -> str:

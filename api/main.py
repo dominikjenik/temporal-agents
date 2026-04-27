@@ -74,18 +74,11 @@ async def handle_request(body: RequestBody):
 @app.get("/manager/{workflow_id}/status")
 async def manager_status(workflow_id: str):
     handle = temporal_client.get_workflow_handle(workflow_id)
-    desc = await handle.describe()
-    _terminal = {
-        WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_COMPLETED,
-        WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_FAILED,
-        WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_TERMINATED,
-        WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_TIMED_OUT,
-        WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_CANCELED,
-    }
-    if desc.status in _terminal:
-        return {"status": "done"}
-    status = await handle.query("get_status")
-    return {"status": status}
+    try:
+        status = await handle.query("get_status")
+        return {"status": status}
+    except Exception:
+        return {"status": "unknown"}
 
 
 @app.get("/manager/{workflow_id}/result")
